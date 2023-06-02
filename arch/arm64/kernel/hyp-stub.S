@@ -131,23 +131,23 @@ SYM_CODE_START_LOCAL(__finalise_el2)
 .Linit_sme_fa64:
 	orr	x0, x0, SMCR_ELx_FA64_MASK
 .Lskip_sme_fa64:
-
-	orr	x0, x0, #SMCR_ELx_LEN_MASK	// Enable full SME vector
-	msr_s	SYS_SMCR_EL2, x0		// length for EL1.
-
-	mrs_s	x1, SYS_SMIDR_EL1		// Priority mapping supported?
-	ubfx    x1, x1, #SMIDR_EL1_SMPS_SHIFT, #1
-	cbz     x1, .Lskip_sme
-
-	msr_s	SYS_SMPRIMAP_EL2, xzr		// Make all priorities equal
-
-	mrs	x1, id_aa64mmfr1_el1		// HCRX_EL2 present?
-	ubfx	x1, x1, #ID_AA64MMFR1_EL1_HCX_SHIFT, #4
-	cbz	x1, .Lskip_sme
-
-	mrs_s	x1, SYS_HCRX_EL2
-	orr	x1, x1, #HCRX_EL2_SMPME_MASK	// Enable priority mapping
-	msr_s	SYS_HCRX_EL2, x1
+// 	disable sme settings to boot-up the linux (FIXME)
+	//orr	x0, x0, #SMCR_ELx_LEN_MASK	// Enable full SME vector
+	//msr_s	SYS_SMCR_EL2, x0		// length for EL1.
+//
+//	mrs_s	x1, SYS_SMIDR_EL1		// Priority mapping supported?
+//	ubfx    x1, x1, #SMIDR_EL1_SMPS_SHIFT, #1
+//	cbz     x1, .Lskip_sme
+//
+//	msr_s	SYS_SMPRIMAP_EL2, xzr		// Make all priorities equal
+//
+//	mrs	x1, id_aa64mmfr1_el1		// HCRX_EL2 present?
+//	ubfx	x1, x1, #ID_AA64MMFR1_EL1_HCX_SHIFT, #4
+//	cbz	x1, .Lskip_sme
+//
+//	mrs_s	x1, SYS_HCRX_EL2
+//	orr	x1, x1, #HCRX_EL2_SMPME_MASK	// Enable priority mapping
+//	msr_s	SYS_HCRX_EL2, x1
 
 .Lskip_sme:
 
