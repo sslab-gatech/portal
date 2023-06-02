@@ -5,7 +5,10 @@ rm -rf tf-a/build
 rm ./QEMU_EFI.fd
 rm -rf edk2_build/Build
 
+ROOT=$PWD
+
 # build qemu
+mkdir -p ./qemu/build
 cd ./qemu/build
 ../configure --target-list=aarch64-softmmu --disable-docs 
 make -j 48
@@ -13,7 +16,7 @@ cd ../../
 
 # build RMM
 cd tf-rmm
-export PATH=/home/jaehyuk/cross/gcc-arm-10.3-2021.07-x86_64-aarch64-none-elf/bin:$PATH
+export PATH=$ROOT/toolchain/gcc-arm-10.3-2021.07-x86_64-aarch64-none-elf/bin:$PATH
 export CROSS_COMPILE=aarch64-none-elf- 
 #cmake -DRMM_CONFIG=fvp_defcfg -S . -B build 
 cmake -DRMM_CONFIG=fvp_defcfg -S . -B build -DCMAKE_BUILD_TYPE=Debug -DLOG_LEVEL=50 -DRMM_PLATFORM=qemu
