@@ -1,4 +1,5 @@
 /*
+ * 					    0x10000000
  * Copyright (c) 2015-2022, ARM Limited and Contributors. All rights reserved.
  *
  * SPDX-License-Identifier: BSD-3-Clause
@@ -190,8 +191,8 @@
  */
 #if ENABLE_RME
 #define QEMU_REALM_BASE			0x0f000000
-#define QEMU_REALM_SIZE			0x01000000
-#define QEMU_REALM_END			0x10000000
+#define QEMU_REALM_SIZE			0x11000000
+#define QEMU_REALM_END			0x20000000
 
 #define RMM_SHARED_SIZE			(PAGE_SIZE)
 #define RMM_SHARED_BASE			(QEMU_REALM_END - RMM_SHARED_SIZE)
