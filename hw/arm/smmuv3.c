@@ -252,6 +252,8 @@ static void smmuv3_init_regs(SMMUv3State *s)
     s->idr[0] = FIELD_DP32(s->idr[0], IDR0, TERM_MODEL, 1);
     /* 2-level stream table supported */
     s->idr[0] = FIELD_DP32(s->idr[0], IDR0, STLEVEL, 1);
+    /* RME support for SMMU */
+    s->idr[0] = FIELD_DP32(s->idr[0], IDR0, RME_IMPL, 1);
 
     s->idr[1] = FIELD_DP32(s->idr[1], IDR1, SIDSIZE, SMMU_IDR1_SIDSIZE);
     s->idr[1] = FIELD_DP32(s->idr[1], IDR1, EVENTQS, SMMU_EVENTQS);
