@@ -1,3 +1,4 @@
 *.fd
+out/
 *.bin
 *.gz
