@@ -77,8 +77,11 @@ int __init smmuv3_security_init(uintptr_t smmu_base)
 int __init smmuv3_init(uintptr_t smmu_base)
 {
 	/* Abort all incoming transactions */
+	/* QEMU doesn't support the secure SMMU */
+#if 0
 	if (smmuv3_security_init(smmu_base) != 0)
 		return -1;
+#endif 
 
 #if ENABLE_RME
 

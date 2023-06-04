@@ -5,12 +5,12 @@
  */
 
 #include <assert.h>
-
 #include <common/bl_common.h>
 #include <drivers/arm/pl061_gpio.h>
 #include <plat/common/platform.h>
 #if ENABLE_RME
 #include <lib/gpt_rme/gpt_rme.h>
+#include <drivers/arm/smmu_v3.h>
 #endif
 
 #include "qemu_private.h"
@@ -96,6 +96,7 @@ void bl31_early_platform_setup2(u_register_t arg0, u_register_t arg1,
 	if (rmm_image_ep_info.pc == 0U)
 		panic();
 #endif
+	smmuv3_init(0x9050000);
 }
 
 void bl31_plat_arch_setup(void)

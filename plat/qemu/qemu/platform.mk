@@ -203,7 +203,9 @@ endif
 
 ifeq (${ENABLE_RME},1)
 BL31_SOURCES	+=  $(PLAT_QEMU_COMMON_PATH)/qemu_plat_attest_token.c  \
-				$(PLAT_QEMU_COMMON_PATH)/qemu_realm_attest_key.c
+				$(PLAT_QEMU_COMMON_PATH)/qemu_realm_attest_key.c	\
+				drivers/arm/smmu/smmu_v3.c  #add smmu 
+
 endif
 
 
