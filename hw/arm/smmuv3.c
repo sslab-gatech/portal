@@ -269,6 +269,10 @@ static void smmuv3_init_regs(SMMUv3State *s)
     s->idr[5] = FIELD_DP32(s->idr[5], IDR5, GRAN64K, 1);
     s->idr[5] = FIELD_DP32(s->idr[5], IDR5, OAS, SMMU_IDR5_OAS); /* 44 bits */
 
+    /* RME registers */
+    s->smmu_root_idr0 = FIELD_DP32(s->smmu_root_idr0, SMMU_ROOT_IDR0, ROOT_IMPL, 1);
+
+
     s->cmdq.base = deposit64(s->cmdq.base, 0, 5, SMMU_CMDQS);
     s->cmdq.prod = 0;
     s->cmdq.cons = 0;
@@ -1393,6 +1397,9 @@ static MemTxResult smmu_readl(SMMUv3State *s, hwaddr offset,
     case A_EVENTQ_CONS:
         *data = s->eventq.cons;
         return MEMTX_OK;
+    case A_SMMU_ROOT_IDR0:
+	*data = s->smmu_root_idr0;
+	return MEMTX_OK;
     default:
         *data = 0;
         qemu_log_mask(LOG_UNIMP,
