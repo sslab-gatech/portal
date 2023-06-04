@@ -273,6 +273,8 @@ static void smmuv3_init_regs(SMMUv3State *s)
     s->smmu_root_idr0 = FIELD_DP32(s->smmu_root_idr0, SMMU_ROOT_IDR0, ROOT_IMPL, 1);
     s->smmu_root_gpt_base = 0;
     s->smmu_root_gpt_base_cfg = 0;
+    s->smmu_root_cr0 = 0;
+    s->smmu_root_cr0ack = 0;
 
     s->cmdq.base = deposit64(s->cmdq.base, 0, 5, SMMU_CMDQS);
     s->cmdq.prod = 0;
