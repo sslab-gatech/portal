@@ -58,6 +58,8 @@ struct SMMUv3State {
     uint32_t eventq_irq_cfg1;
     uint32_t eventq_irq_cfg2;
     uint32_t smmu_root_idr0;
+    uint64_t smmu_root_gpt_base; 
+    uint64_t smmu_root_gpt_base_cfg;
 
     SMMUQueue eventq, cmdq;
 

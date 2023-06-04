@@ -271,7 +271,7 @@ static void smmuv3_init_regs(SMMUv3State *s)
 
     /* RME registers */
     s->smmu_root_idr0 = FIELD_DP32(s->smmu_root_idr0, SMMU_ROOT_IDR0, ROOT_IMPL, 1);
-
+    s->smmu_root_gpt_base_cfg = 0;
 
     s->cmdq.base = deposit64(s->cmdq.base, 0, 5, SMMU_CMDQS);
     s->cmdq.prod = 0;
@@ -1134,6 +1134,12 @@ static MemTxResult smmu_writell(SMMUv3State *s, hwaddr offset,
     case A_EVENTQ_IRQ_CFG0:
         s->eventq_irq_cfg0 = data;
         return MEMTX_OK;
+    case A_SMMU_ROOT_GPT_BASE:
+	s->smmu_root_gpt_base = data;
+	return MEMTX_OK;
+    case A_SMMU_ROOT_GPT_BASE_CFG:
+	s->smmu_root_gpt_base_cfg = data;
+	return MEMTX_OK;
     default:
         qemu_log_mask(LOG_UNIMP,
                       "%s Unexpected 64-bit access to 0x%"PRIx64" (WI)\n",
@@ -1400,6 +1406,13 @@ static MemTxResult smmu_readl(SMMUv3State *s, hwaddr offset,
     case A_SMMU_ROOT_IDR0:
 	*data = s->smmu_root_idr0;
 	return MEMTX_OK;
+    case A_SMMU_ROOT_GPT_BASE:
+	*data = s->smmu_root_gpt_base;
+	return MEMTX_OK;
+    case A_SMMU_ROOT_GPT_BASE_CFG:
+	*data = s->smmu_root_gpt_base_cfg;
+	return MEMTX_OK;
+
     default:
         *data = 0;
         qemu_log_mask(LOG_UNIMP,
