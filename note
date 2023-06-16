@@ -1,5 +1,30 @@
 PORTAL: Secure Channel Connecting Realm and Accelerators
 
+Goal
+G1: The portal should not prevent NW host kernel from utilizing peripherals 
+S1: Explain what should be checked, like what configuration of the STE should be checked 
+not to make it bypass the SMMU translation. The translation table should be protected..
+mimic how the TDX manage s-ept. everytime it needs to modify s-ept on behalf of HV, it 
+invoked the TDCALL. Similar to this, we can make the host kernel to invoke s-ept like RMI 
+call to make the RMM to change the SMMU page tables. Also make it to be protected 
+from nw kernel using unsynch gpt and prevent the devices from accessing these 
+regions by checking translation table. The every physical address fed to modify
+s-smmu-pages should be memorized and checked (bloom filters)
+Cause the translation tables and STE entries will be read by SMMU itself and 
+SMMU can trigger the GPC fault cause its own access should be checked by the 
+GPT too. so for SMMU gpts it should be set as NW pages. 
+
+
+We can simply set up the GPT in SMMU and NW gpt for processors. 
+
+
+It actually doesn't need to check the mid level entries, but only the last entries should be 
+checked. 
+
+Also we can make host kernel to mirror the stream tables and translation tables so that 
+it can minimize the performance to lookup the tables (reducing lots of overhead cause 
+it needs to access the STE and other tables frequently to set up tables..) 
+
 
 In virtualized scenarios, Arm expects a hypervisor to:
 • Convert guest STEs into physical SMMU STEs, controlling permissions and features as required.
