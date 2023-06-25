@@ -90,11 +90,16 @@ int __init smmuv3_init(uintptr_t smmu_base)
 				  SMMU_ROOT_IDR0_ROOT_IMPL) == 0U) {
 			WARN("Skip SMMU GPC configuration.\n");
 		} else {
+			INFO("Initialize SMMU_for RME\n");
 			uint64_t gpccr_el3 = read_gpccr_el3();
 			uint64_t gptbr_el3 = read_gptbr_el3();
 
+
 			/* SMMU_ROOT_GPT_BASE_CFG[16] is RES0. */
 			gpccr_el3 &= ~(1UL << 16);
+
+			INFO("Global GPCCR_EL3:%lx\n", gpccr_el3);
+			INFO("Global GPTBR_EL3:%lx\n", gptbr_el3);
 
 			/*
 			 * TODO: SMMU_ROOT_GPT_BASE_CFG is 64b in the spec,
@@ -111,6 +116,14 @@ int __init smmuv3_init(uintptr_t smmu_base)
 			mmio_write_64(smmu_base + SMMU_ROOT_GPT_BASE,
 				      gptbr_el3 << 12);
 
+
+			/* test if the registers were correctly written */
+			gptbr_el3 = gpccr_el3 = 0;
+			gptbr_el3 = mmio_read_64(smmu_base + SMMU_ROOT_GPT_BASE);
+			gpccr_el3 = mmio_read_64(smmu_base + SMMU_ROOT_GPT_BASE_CFG);
+			INFO("SMMU GPCCR_EL3:%lx\n", gpccr_el3);
+			INFO("SMMU GPTBR_EL3:%lx\n", gptbr_el3);
+
 			/*
 			 * ACCESSEN=1: SMMU- and client-originated accesses are
 			 *             not terminated by this mechanism.
@@ -120,6 +133,8 @@ int __init smmuv3_init(uintptr_t smmu_base)
 			mmio_setbits_32(smmu_base + SMMU_ROOT_CR0,
 					SMMU_ROOT_CR0_GPCEN |
 					SMMU_ROOT_CR0_ACCESSEN);
+
+			INFO("SMMU_ROOT_CR0:%x\n", mmio_read_32(smmu_base + SMMU_ROOT_CR0));
 
 			/* Poll for ACCESSEN and GPCEN ack bits. */
 			if (smmuv3_poll(smmu_base + SMMU_ROOT_CR0ACK,
