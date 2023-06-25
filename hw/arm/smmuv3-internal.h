@@ -134,7 +134,8 @@ REG32(EVENTQ_IRQ_CFG2,     0xbc)
 #define A_IDREGS           0xfd0
 
 
-/* new registers for RME */
+/* new registers for RME */ 
+//TODO{Access checks for each register properly}
 #define SMMU_ROOT_PAGE_OFFSET (0x2000)
 REG32(SMMU_ROOT_IDR0,          (SMMU_ROOT_PAGE_OFFSET + 0x0000))
     FIELD(SMMU_ROOT_IDR0, ROOT_IMPL, 0, 1) 
