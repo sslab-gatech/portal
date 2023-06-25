@@ -1,3 +1,7 @@
+nw-linux
+qemu
+tf-a
+tf-rmm
 *.fd
 out/
 *.bin
