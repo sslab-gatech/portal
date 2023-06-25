@@ -335,6 +335,7 @@ static int __iommu_probe_device(struct device *dev, struct list_head *group_list
 		goto out_module_put;
 	}
 
+	printk("iommu dev found!!!\n\n");
 	dev->iommu->iommu_dev = iommu_dev;
 	dev->iommu->max_pasids = dev_iommu_get_max_pasids(dev);
 
@@ -1698,10 +1699,12 @@ static int probe_iommu_group(struct device *dev, void *data)
 	struct iommu_group *group;
 	int ret;
 
+	//printk("device name on the bus (%s) :%s\n", dev->bus->name, kobject_name(&dev->kobj));
 	/* Device is probed already if in a group */
 	group = iommu_group_get(dev);
 	if (group) {
 		iommu_group_put(group);
+		printk("already on the group\n");
 		return 0;
 	}
 
@@ -1720,6 +1723,7 @@ static int iommu_bus_notifier(struct notifier_block *nb,
 	if (action == BUS_NOTIFY_ADD_DEVICE) {
 		int ret;
 
+		//printk("iommu_bus_notifier for new added device\n\n\n");
 		ret = iommu_probe_device(dev);
 		return (ret) ? NOTIFY_DONE : NOTIFY_OK;
 	} else if (action == BUS_NOTIFY_REMOVED_DEVICE) {
@@ -1840,6 +1844,7 @@ int bus_iommu_probe(struct bus_type *bus)
 		return ret;
 
 	list_for_each_entry_safe(group, next, &group_list, entry) {
+		printk("\n\nsome entries in group_list\n");
 		mutex_lock(&group->mutex);
 
 		/* Remove item from the list */

@@ -1540,6 +1540,7 @@ int acpi_iommu_fwspec_init(struct device *dev, u32 id,
 			   const struct iommu_ops *ops)
 {
 	int ret = iommu_fwspec_init(dev, fwnode, ops);
+	printk("acpi_iommu_fwspec_init\n\n");
 
 	if (!ret)
 		ret = iommu_fwspec_add_ids(dev, &id, 1);

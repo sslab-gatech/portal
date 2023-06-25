@@ -1329,6 +1329,8 @@ int iort_iommu_configure_id(struct device *dev, const u32 *id_in)
 	struct acpi_iort_node *node;
 	int err = -ENODEV;
 
+	printk("iort_iommu_configure_id\n");
+
 	if (dev_is_pci(dev)) {
 		struct iommu_fwspec *fwspec;
 		struct pci_bus *bus = to_pci_dev(dev)->bus;

@@ -2902,15 +2902,19 @@ static int arm_smmu_init_one_queue(struct arm_smmu_device *smmu,
 			 1 << q->llq.max_n_shift, name);
 	}
 
+	printk("Queue Init: %s\n", name);
 	q->prod_reg	= page + prod_off;
 	q->cons_reg	= page + cons_off;
 	q->ent_dwords	= dwords;
+	printk("page:%llx prod_off:%lx cons_off:%lx\n",(uint64_t)page, prod_off, cons_off);
+	printk("prod_reg:%llx, cons_reg:%llx\n", (uint64_t) q->prod_reg, (uint64_t) q->cons_reg);
 
 	q->q_base  = Q_BASE_RWA;
 	q->q_base |= q->base_dma & Q_BASE_ADDR_MASK;
 	q->q_base |= FIELD_PREP(Q_BASE_LOG2SIZE, q->llq.max_n_shift);
 
 	q->llq.prod = q->llq.cons = 0;
+	printk("queue virtual base addr:%llx phys add:%llx\n", (uint64_t) q->base, (uint64_t) q->base_dma);
 	return 0;
 }
 
@@ -2976,6 +2980,9 @@ static int arm_smmu_init_l1_strtab(struct arm_smmu_device *smmu)
 
 	cfg->l1_desc = devm_kcalloc(smmu->dev, cfg->num_l1_ents,
 				    sizeof(*cfg->l1_desc), GFP_KERNEL);
+	printk("size of l1 descriptor:0x%lx, entire size:0x%lx\n", 
+			sizeof(*cfg->l1_desc), sizeof(*cfg->l1_desc) * cfg->num_l1_ents);
+	printk("l1_desc base virt:%llx\n", (uint64_t)cfg->l1_desc);
 	if (!cfg->l1_desc)
 		return -ENOMEM;
 
@@ -3008,6 +3015,9 @@ static int arm_smmu_init_strtab_2lvl(struct arm_smmu_device *smmu)
 	l1size = cfg->num_l1_ents * (STRTAB_L1_DESC_DWORDS << 3);
 	strtab = dmam_alloc_coherent(smmu->dev, l1size, &cfg->strtab_dma,
 				     GFP_KERNEL);
+	printk("Stream table init for 2-lvl\n");
+	printk("l1table entries :%d size:0x%x\n", cfg->num_l1_ents, l1size);
+	printk("l1table virt:%llx phys:%llx\n", (uint64_t)strtab, (uint64_t)cfg->strtab_dma );
 	if (!strtab) {
 		dev_err(smmu->dev,
 			"failed to allocate l1 stream table (%u bytes)\n",
@@ -3053,6 +3063,7 @@ static int arm_smmu_init_strtab_linear(struct arm_smmu_device *smmu)
 	return 0;
 }
 
+/* basically initialize memory and set-up the registers properly */
 static int arm_smmu_init_strtab(struct arm_smmu_device *smmu)
 {
 	u64 reg;
@@ -3069,6 +3080,7 @@ static int arm_smmu_init_strtab(struct arm_smmu_device *smmu)
 	/* Set the strtab base address */
 	reg  = smmu->strtab_cfg.strtab_dma & STRTAB_BASE_ADDR_MASK;
 	reg |= STRTAB_BASE_RA;
+	// strtab_base contains value that should be written to the register later
 	smmu->strtab_cfg.strtab_base = reg;
 
 	/* Allocate the first VMID for stage-2 bypass STEs */
@@ -3413,6 +3425,8 @@ static int arm_smmu_device_reset(struct arm_smmu_device *smmu, bool bypass)
 	return 0;
 }
 
+
+// check smmu registers and initialize relevant kernel structures
 static int arm_smmu_device_hw_probe(struct arm_smmu_device *smmu)
 {
 	u32 reg;
@@ -3771,6 +3785,7 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 	ioaddr = res->start;
+	printk("SMMUV3 Base Physical Addr:%llx, Size:%llx\n", ioaddr, resource_size(res));
 
 	/*
 	 * Don't map the IMPLEMENTATION DEFINED regions, since they may contain
@@ -3807,6 +3822,8 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
 		if (irq > 0)
 			smmu->gerr_irq = irq;
 	}
+	printk("IRQ for SMMU: combined:%d, eventq:%d, priq:%d, gerror:%d\n", 
+			smmu->combined_irq, smmu->evtq.q.irq, smmu->priq.q.irq, smmu->gerr_irq);
 	/* Probe the h/w */
 	ret = arm_smmu_device_hw_probe(smmu);
 	if (ret)
@@ -3821,6 +3838,7 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, smmu);
 
 	/* Check for RMRs and install bypass STEs if any */
+	// TODO: may be disable bypass ste? No request should not be under control of SMMU
 	arm_smmu_rmr_install_bypass_ste(smmu);
 
 	/* Reset the device */
