@@ -136,7 +136,7 @@ REG32(EVENTQ_IRQ_CFG2,     0xbc)
 
 /* new registers for RME */ 
 //TODO{Access checks for each register properly}
-#define SMMU_ROOT_PAGE_OFFSET (0x2000)
+#define SMMU_ROOT_PAGE_OFFSET (0x20000)
 REG32(SMMU_ROOT_IDR0,          (SMMU_ROOT_PAGE_OFFSET + 0x0000))
     FIELD(SMMU_ROOT_IDR0, ROOT_IMPL, 0, 1) 
     FIELD(SMMU_ROOT_IDR0, BGPTM, 0, 1) 
