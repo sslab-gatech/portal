@@ -134,9 +134,15 @@ REG32(EVENTQ_IRQ_CFG2,     0xbc)
 #define A_IDREGS           0xfd0
 
 
-/* new registers for RME */ 
-//TODO{Access checks for each register properly}
-#define SMMU_ROOT_PAGE_OFFSET (0x20000)
+/* new registers for RME 
+ *
+ * Dirty hack for root page for rme. 
+ * root page should be located base + 0x20000, but the other physical registers
+ * are mapped right after the mmio region of the smmu (base + 0x20000). So 
+ * instead of using the 0x20000 offset, use 0x10000 offset because it is not 
+ * utilized by current QEMU implementation 
+ */
+#define SMMU_ROOT_PAGE_OFFSET (0x10000)
 REG32(SMMU_ROOT_IDR0,          (SMMU_ROOT_PAGE_OFFSET + 0x0000))
     FIELD(SMMU_ROOT_IDR0, ROOT_IMPL, 0, 1) 
     FIELD(SMMU_ROOT_IDR0, BGPTM, 0, 1) 
