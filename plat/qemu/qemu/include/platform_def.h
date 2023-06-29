@@ -291,6 +291,10 @@
 #define DEVICE1_BASE			0x09000000
 #define DEVICE1_SIZE			0x00c00000
 
+/* SMMU related constants */
+#define PLAT_QEMU_SMMUV3_BASE           UL(0x9050000)
+#define PLAT_ARM_SMMUV3_ROOT_REG_OFFSET UL(0x20000)
+
 /*
  * GIC related constants
  */
