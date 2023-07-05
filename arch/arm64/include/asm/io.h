@@ -17,6 +17,7 @@
 #include <asm/early_ioremap.h>
 #include <asm/alternative.h>
 #include <asm/cpufeature.h>
+#include <asm/rmi_cmds.h>
 
 /*
  * Generic IO read/write.  These perform native-endian accesses.
@@ -182,5 +183,11 @@ extern int valid_mmap_phys_addr_range(unsigned long pfn, size_t size);
 extern bool arch_memremap_can_ram_remap(resource_size_t offset, size_t size,
 					unsigned long flags);
 #define arch_memremap_can_ram_remap arch_memremap_can_ram_remap
+
+
+static inline u32 readl_portal_relaxed(phys_addr_t addr)
+{
+        return portal_readl_smmu_reg(addr);
+}
 
 #endif	/* __ASM_IO_H */

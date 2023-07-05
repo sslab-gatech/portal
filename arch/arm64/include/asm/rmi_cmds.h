@@ -256,4 +256,18 @@ static inline phys_addr_t rmi_rtt_get_phys(struct rtt_entry *rtt)
 	return rtt->desc & GENMASK(47, 12);
 }
 
+enum {
+	REG_32BIT,
+	REG_64BIT
+};
+
+static inline u32 portal_readl_smmu_reg (phys_addr_t addr)
+{
+	struct arm_smccc_res res; 
+
+	arm_smccc_1_1_invoke(SMC_PMI_READ_SMMU_REG, addr, REG_32BIT , &res);
+
+	return (u32)res.a0; 
+}
+
 #endif

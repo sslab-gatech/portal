@@ -239,4 +239,13 @@ struct rec_run {
 #define RMI_EXIT_HOST_CALL		0x05
 #define RMI_EXIT_SERROR			0x06
 
+//TODO move it to portal
+#define SMC_PxI_CALL(func)				\
+	ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL,		\
+			   ARM_SMCCC_SMC_64,		\
+			   ARM_SMCCC_OWNER_STANDARD,	\
+			   (func))
+
+#define SMC_PMI_READ_SMMU_REG	SMC_RxI_CALL(0x1F0)
+#define SMC_PMI_WRITE_SMMU_REG	SMC_PxI_CALL(0x1F1)
 #endif

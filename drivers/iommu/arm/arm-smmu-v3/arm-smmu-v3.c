@@ -26,10 +26,14 @@
 #include <linux/pci.h>
 #include <linux/pci-ats.h>
 #include <linux/platform_device.h>
+#include <asm/pgtable-types.h>
 
 #include "arm-smmu-v3.h"
 #include "../../dma-iommu.h"
 #include "../../iommu-sva.h"
+
+
+
 
 static bool disable_bypass = true;
 module_param(disable_bypass, bool, 0444);
@@ -2938,6 +2942,7 @@ static int arm_smmu_init_queues(struct arm_smmu_device *smmu)
 {
 	int ret;
 
+	printk("Initialize SMMU queues\n");
 	/* cmdq */
 	ret = arm_smmu_init_one_queue(smmu, &smmu->cmdq.q, smmu->base,
 				      ARM_SMMU_CMDQ_PROD, ARM_SMMU_CMDQ_CONS,
@@ -3425,6 +3430,51 @@ static int arm_smmu_device_reset(struct arm_smmu_device *smmu, bool bypass)
 	return 0;
 }
 
+static phys_addr_t xlate_virt_to_phys(unsigned long virtual_address)
+{
+	pgd_t *pgd;
+	p4d_t *p4d;
+	pud_t *pud;
+	pmd_t *pmd;
+	pte_t *pte;
+	phys_addr_t physical_address = 0;
+	
+	pgd = pgd_offset_k(virtual_address);
+	if (pgd_none(*pgd) || unlikely(pgd_bad(*pgd)))
+		goto out;
+
+	printk("%llx\n", pgd_val(*pgd));
+
+	p4d = p4d_offset(pgd, virtual_address);
+	if (p4d_none(*p4d) || unlikely(p4d_bad(*p4d)))
+		goto out;
+
+	printk("%llx\n", p4d_val(*p4d));
+
+	pud = pud_offset(p4d, virtual_address);
+	if (pud_none(*pud) || unlikely(pud_bad(*pud)))
+		goto out;
+
+	printk("%llx\n", pud_val(*pud));
+	
+	pmd = pmd_offset(pud, virtual_address);
+	if (pmd_none(*pmd) || unlikely(pmd_bad(*pmd)))
+		goto out;
+
+	printk("%llx\n", pmd_val(*pmd));
+	
+	pte = pte_offset_kernel(pmd, virtual_address);
+	if (!pte || !pte_present(*pte))
+		goto out;
+	
+	printk("%llx\n", pte_val(*pte));
+
+	physical_address = (pte_pfn(*pte) << PAGE_SHIFT) | (virtual_address & ~PAGE_MASK);
+
+out:
+	printk("%s: VirtAddr(%lx) -> PhyAddr(%llx)\n", __func__, virtual_address, physical_address);
+	return physical_address;
+}
 
 // check smmu registers and initialize relevant kernel structures
 static int arm_smmu_device_hw_probe(struct arm_smmu_device *smmu)
@@ -3433,7 +3483,9 @@ static int arm_smmu_device_hw_probe(struct arm_smmu_device *smmu)
 	bool coherent = smmu->features & ARM_SMMU_FEAT_COHERENCY;
 
 	/* IDR0 */
-	reg = readl_relaxed(smmu->base + ARM_SMMU_IDR0);
+	//reg = readl_relaxed(smmu->base + ARM_SMMU_IDR0);
+	reg = readl_portal_relaxed(xlate_virt_to_phys(smmu->base + ARM_SMMU_IDR0));
+	printk("value read from portal:%x\n", reg);
 
 	/* 2-level structures */
 	if (FIELD_GET(IDR0_ST_LVL, reg) == IDR0_ST_LVL_2LVL)
@@ -3531,7 +3583,10 @@ static int arm_smmu_device_hw_probe(struct arm_smmu_device *smmu)
 	smmu->vmid_bits = reg & IDR0_VMID16 ? 16 : 8;
 
 	/* IDR1 */
+	printk("readl_relaex\n");
 	reg = readl_relaxed(smmu->base + ARM_SMMU_IDR1);
+	printk("readl_relaex done\n");
+
 	if (reg & (IDR1_TABLES_PRESET | IDR1_QUEUES_PRESET | IDR1_REL)) {
 		dev_err(smmu->dev, "embedded implementation not supported\n");
 		return -ENXIO;

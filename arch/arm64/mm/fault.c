@@ -771,6 +771,7 @@ static int do_gpf(unsigned long far, unsigned long esr, struct pt_regs *regs)
 	if (!is_el1_instruction_abort(esr) && fixup_exception(regs))
 		return 0;
 
+	printk("Faulted IP:%llx\n", regs->pc);
 	arm64_notify_die(inf->name, regs, inf->sig, inf->code, far, esr);
 	return 0;
 }
