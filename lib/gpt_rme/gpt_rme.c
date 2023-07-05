@@ -1258,3 +1258,79 @@ int gpt_undelegate_pas(uint64_t base, size_t size, unsigned int src_sec_state)
 
 	return 0;
 }
+
+
+int gpt_set_portal (uint64_t base, size_t size)
+{
+	gpi_info_t gpi_info;
+	uint64_t nse;
+	int res;
+	unsigned int target_pas;
+	unsigned int pageIdx = 0;
+	uint64_t target_base = 0;
+
+	/* Ensure that the tables have been set up before taking requests. */
+	assert(gpt_config.plat_gpt_l0_base != 0UL);
+
+	/* Ensure that caches are enabled. */
+	assert((read_sctlr_el3() & SCTLR_C_BIT) != 0UL);
+
+	/* Check that base and size are valid */
+	if ((ULONG_MAX - base) < size) {
+		VERBOSE("[GPT] Transition request address overflow!\n");
+		VERBOSE("      Base=0x%" PRIx64 "\n", base);
+		VERBOSE("      Size=0x%lx\n", size);
+		return -EINVAL;
+	}
+
+	for ( pageIdx = 0; pageIdx < size / PAGE_SIZE_4KB; pageIdx ++) {
+		target_base = base + (PAGE_SIZE_4KB * pageIdx); 
+		//target_pas = GPT_GPI_REALM;
+		target_pas = GPT_GPI_ROOT;
+
+		/*
+		 * Access to L1 tables is controlled by a global lock to ensure
+		 * that no more than one CPU is allowed to make changes at any
+		 * given time.
+		 */
+		spin_lock(&gpt_lock);
+		res = get_gpi_params(target_base, &gpi_info);
+		if (res != 0) {
+			spin_unlock(&gpt_lock);
+			return res;
+		}
+
+		//nse = (uint64_t)GPT_NSE_REALM << GPT_NSE_SHIFT;
+		nse = (uint64_t)GPT_NSE_ROOT << GPT_NSE_SHIFT;
+
+		/*
+		 * In order to maintain mutual distrust between Realm and Secure
+		 * states, remove any data speculatively fetched into the target
+		 * physical address space. Issue DC CIPAPA over address range
+		 */
+		flush_dcache_to_popa_range(nse | target_base,
+					   GPT_PGS_ACTUAL_SIZE(gpt_config.p));
+
+		write_gpt(&gpi_info.gpt_l1_desc, gpi_info.gpt_l1_addr,
+			  gpi_info.gpi_shift, gpi_info.idx, target_pas);
+		dsboshst();
+
+		gpt_tlbi_by_pa_ll(target_base, GPT_PGS_ACTUAL_SIZE(gpt_config.p));
+		dsbosh();
+
+		nse = (uint64_t)GPT_NSE_NS << GPT_NSE_SHIFT;
+
+		flush_dcache_to_popa_range(nse | target_base,
+					   GPT_PGS_ACTUAL_SIZE(gpt_config.p));
+
+		/* Unlock access to the L1 tables. */
+		spin_unlock(&gpt_lock);
+		/*
+		 * The isb() will be done as part of context
+		 * synchronization when returning to lower EL
+		 */
+		INFO("[GPT] Granule 0x%" PRIx64 ", GPI 0x%x->0x%x\n",
+			target_base, gpi_info.gpi, target_pas);
+	}
+	return 0;
+}

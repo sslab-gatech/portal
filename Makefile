@@ -1248,6 +1248,7 @@ $(eval $(call add_defines,\
         ENABLE_PMF \
         ENABLE_PSCI_STAT \
         ENABLE_RME \
+        ENABLE_PORTAL \
         ENABLE_RUNTIME_INSTRUMENTATION \
         ENABLE_SME_FOR_NS \
         ENABLE_SME_FOR_SWD \

@@ -442,3 +442,34 @@ uint64_t rmmd_rmm_el3_handler(uint32_t smc_fid, uint64_t x1, uint64_t x2,
 		SMC_RET1(handle, SMC_UNK);
 	}
 }
+
+
+#include <drivers/arm/smmu_v3.h>
+uint64_t portal_el3_handler(uint32_t smc_fid, uint64_t x1, uint64_t x2,
+			  uint64_t x3, uint64_t x4, void *cookie,
+			  void *handle, uint64_t flags)
+{
+	INFO("%s\n", __func__);
+	return 1;
+}
+
+uint64_t pmi_handler(uint32_t smc_fid, uint64_t x1, uint64_t x2,
+			  uint64_t x3, uint64_t x4, void *cookie,
+			  void *handle, uint64_t flags)
+{
+	int ret;
+	uint64_t res1; 
+
+	INFO("%s: smc_fid:%x  x1:%lx x2:%lx x3:%lx x4:%lx \n", __func__, 
+			smc_fid, x1, x2, x3, x4);
+	INFO("flags:%lx\n" , flags);
+
+	switch (smc_fid) {
+	case PMI_READ_SMMU_REG:
+		ret = read_smmu_reg(x1, x2, &res1);
+		SMC_RET2(handle, ret, res1);
+	default:
+		WARN("PMMD: Unsupported PMI call 0x%08x\n", smc_fid);
+		SMC_RET1(handle, SMC_UNK);
+	}
+}

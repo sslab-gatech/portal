@@ -20,6 +20,7 @@
 #include <lib/el3_runtime/context_mgmt.h>
 #include <lib/pmf/pmf.h>
 #include <lib/runtime_instr.h>
+#include <lib/gpt_rme/gpt_rme.h>
 #include <plat/common/platform.h>
 #include <services/std_svc.h>
 
@@ -183,6 +184,16 @@ void bl31_main(void)
 	}
 #endif
 
+#if ENABLE_PORTAL
+	// block memory regions based on filter 
+
+	// block SMMU
+	if( !gpt_set_portal(PLAT_QEMU_SMMUV3_BASE, PLAT_ARM_SMMUV3_ROOT_REG_OFFSET) )
+		WARN("Building portal for smmu failed\n");
+
+
+
+#endif 
 	/*
 	 * We are ready to enter the next EL. Prepare entry into the image
 	 * corresponding to the desired security state after the next ERET.

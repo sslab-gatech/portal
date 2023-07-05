@@ -184,5 +184,73 @@ uint64_t rmmd_rmm_el3_handler(uint32_t smc_fid,
 		void *handle,
 		uint64_t flags);
 
+//TODO: Move below to portal smc
+#define PORTAL_EL3_FNUM_MIN_VALUE	U(0x1D0)
+#define PORTAL_EL3_FNUM_MAX_VALUE	U(0x1EF)
+
+#define SMC64_PORTAL_EL3_FID(_offset)					  \
+	((SMC_TYPE_FAST << FUNCID_TYPE_SHIFT)				| \
+	 (SMC_64 << FUNCID_CC_SHIFT)					| \
+	 (OEN_STD_START << FUNCID_OEN_SHIFT)				| \
+	 (((PORTAL_EL3_FNUM_MIN_VALUE + (_offset)) & FUNCID_NUM_MASK)	  \
+	  << FUNCID_NUM_SHIFT))
+
+#define is_portal_el3_fid(fid) __extension__ ({		\
+	__typeof__(fid) _fid = (fid);			\
+	((GET_SMC_NUM(_fid) >= PORTAL_EL3_FNUM_MIN_VALUE) &&\
+	(GET_SMC_NUM(_fid) <= PORTAL_EL3_FNUM_MAX_VALUE)  &&\
+	(GET_SMC_TYPE(_fid) == SMC_TYPE_FAST)	    &&	\
+	(GET_SMC_CC(_fid) == SMC_64)                &&	\
+	(GET_SMC_OEN(_fid) == OEN_STD_START)        &&	\
+	((_fid & 0x00FE0000) == 0U)); })
+
+/**/ 
+#define PMI_FNUM_MIN_VALUE		U(0x1F0)
+#define PMI_FNUM_MAX_VALUE		U(0x20F)
+
+#define SMC64_PMI_FID(_offset)					  \
+	((SMC_TYPE_FAST << FUNCID_TYPE_SHIFT)				| \
+	 (SMC_64 << FUNCID_CC_SHIFT)					| \
+	 (OEN_STD_START << FUNCID_OEN_SHIFT)				| \
+	 (((PMI_FNUM_MIN_VALUE + (_offset)) & FUNCID_NUM_MASK)	  \
+	  << FUNCID_NUM_SHIFT))
+
+/* The macros below are used to identify GTSI calls from the SMC function ID */
+#define is_pmi_fid(fid) __extension__ ({		\
+	__typeof__(fid) _fid = (fid);			\
+	((GET_SMC_NUM(_fid) >= PMI_FNUM_MIN_VALUE) &&\
+	(GET_SMC_NUM(_fid) <= PMI_FNUM_MAX_VALUE)  &&\
+	(GET_SMC_TYPE(_fid) == SMC_TYPE_FAST)	    &&	\
+	(GET_SMC_CC(_fid) == SMC_64)                &&	\
+	(GET_SMC_OEN(_fid) == OEN_STD_START)        &&	\
+	((_fid & 0x00FE0000) == 0U)); })
+
+#define PMI_READ_SMMU_REG		SMC64_PMI_FID(U(0))
+#define PMI_WRITE_SMMU_REG		SMC64_PMI_FID(U(0))
+
+
+enum regSize {
+	REG_32BIT,
+	REG_64BIT
+}; 
+
+uint64_t portal_el3_handler(uint32_t smc_fid,
+		uint64_t x1,
+		uint64_t x2,
+		uint64_t x3,
+		uint64_t x4,
+		void *cookie,
+		void *handle,
+		uint64_t flags);
+
+uint64_t pmi_handler(uint32_t smc_fid,
+		uint64_t x1,
+		uint64_t x2,
+		uint64_t x3,
+		uint64_t x4,
+		void *cookie,
+		void *handle,
+		uint64_t flags);
+
 #endif /* __ASSEMBLER__ */
 #endif /* RMMD_SVC_H */

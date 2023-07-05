@@ -96,7 +96,7 @@ void bl31_early_platform_setup2(u_register_t arg0, u_register_t arg1,
 	if (rmm_image_ep_info.pc == 0U)
 		panic();
 #endif
-	smmuv3_init(0x9050000);
+	smmuv3_init(PLAT_QEMU_SMMUV3_BASE);
 }
 
 void bl31_plat_arch_setup(void)

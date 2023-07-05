@@ -190,6 +190,19 @@ static uintptr_t std_svc_smc_handler(uint32_t smc_fid,
 	}
 #endif
 
+#if ENABLE_PORTAL
+	if (is_portal_el3_fid(smc_fid)) {
+		return portal_el3_handler(smc_fid, x1, x2, x3, x4, cookie,
+					handle, flags);
+	}
+
+	if (is_pmi_fid(smc_fid)) {
+		return pmi_handler(smc_fid, x1, x2, x3, x4, cookie,
+					handle, flags);
+	}
+
+#endif 
+
 #if SMC_PCI_SUPPORT
 	if (is_pci_fid(smc_fid)) {
 		return pci_smc_handler(smc_fid, x1, x2, x3, x4, cookie, handle,
