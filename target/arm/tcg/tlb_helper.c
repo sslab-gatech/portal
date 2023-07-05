@@ -112,6 +112,7 @@ static bool report_as_gpc_exception(ARMCPU *cpu, int current_el,
          * R_VBZMW, R_LXHQR: A GPF at EL[0-2] is reported as a GPC
          * if SCR_EL3.GPF is set, otherwise an insn or data abort.
          */
+	//don't know why I get rid of below line, but memorize it for later use
 	cpu->env.cp15.scr_el3 |= SCR_GPF;
 	qemu_log_mask(LOG_UNIMP, "%s: SCR_GPF:%lld \n",
 			__func__, (cpu->env.cp15.scr_el3 & SCR_GPF) >> 48);
