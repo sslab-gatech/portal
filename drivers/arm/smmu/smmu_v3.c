@@ -199,13 +199,8 @@ int smmuv3_ns_set_abort_all(uintptr_t smmu_base)
 	return 0;
 }
 
-
-#if 1
-#define smmu_base	PLAT_QEMU_SMMUV3_BASE
-#define smmu_reg_size	PLAT_ARM_SMMUV3_ROOT_REG_OFFSET
-#endif 
 #include <services/rmmd_svc.h>
-#define is_within_smmu_regs(addr) (addr >= smmu_base  && addr <= smmu_base + smmu_reg_size)
+#define is_within_smmu_regs(addr) (addr >= SMMU_BASE && addr <= SMMU_BASE + SMMU_REG_SIZE)
 
 int read_smmu_reg(uint64_t reg_addr, int size, uint64_t *val) 
 {

@@ -17,6 +17,7 @@
 #include <common/feat_detect.h>
 #include <common/runtime_svc.h>
 #include <drivers/console.h>
+#include <drivers/arm/smmu_v3.h>
 #include <lib/el3_runtime/context_mgmt.h>
 #include <lib/pmf/pmf.h>
 #include <lib/runtime_instr.h>
@@ -188,7 +189,7 @@ void bl31_main(void)
 	// block memory regions based on filter 
 
 	// block SMMU
-	if( !gpt_set_portal(PLAT_QEMU_SMMUV3_BASE, PLAT_ARM_SMMUV3_ROOT_REG_OFFSET) )
+	if( !gpt_set_portal(SMMU_BASE, SMMU_REG_SIZE) )
 		WARN("Building portal for smmu failed\n");
 
 
