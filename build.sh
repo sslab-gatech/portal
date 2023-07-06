@@ -45,7 +45,7 @@ cd ../
 
 # Build TF-A for linux
 export PATH=/home/jaehyuk/cross/gcc-arm-10.3-2021.07-x86_64-aarch64-none-elf/bin:$PATH
-make -C tf-a -j 40 CROSS_COMPILE=aarch64-none-elf- ARCH=aarch64 PLAT=qemu ENABLE_RME=1 DEBUG=1 \
+make -C tf-a -j 40 CROSS_COMPILE=aarch64-none-elf- ARCH=aarch64 PLAT=qemu ENABLE_RME=1 ENABLE_PORTAL=1 DEBUG=1 \
 ARM_LINUX_KERNEL_AS_BL33=1 RMM=../tf-rmm/build/Debug/rmm.img all BL33=../QEMU_EFI.fd all fip
 
 # Build TF-A for tf-a-tests
