@@ -206,6 +206,29 @@ int read_smmu_reg(uint64_t reg_addr, int size, uint64_t *val)
 {
 	if (!is_within_smmu_regs (reg_addr))
 		return 0;
+#if 0
+	uint64_t scr_el3_val = 0;
+	asm volatile(
+		"mrs %0, scr_el3\n\t"
+		:"=r"(scr_el3_val)
+		:
+		:"memory"
+	);
+	INFO("scr_el3:%lx\n", scr_el3_val);
+	//configure NSE/NS bit 
+	asm volatile(
+		"mrs %0, scr_el3\n\t"
+		"mov x18, %0\n\t"
+		"bfi x18, x18, 62, 1\n\t"
+		"and x18, x18, ~1\n\t"
+		"msr scr_el3, x18\n\t"
+		"mrs %0, scr_el3\n\t"
+		:"=r"(scr_el3_val) 
+		:
+		:"memory", "x18"
+	);
+	INFO("scr_el3:%lx\n", scr_el3_val);
+#endif 
 
 	switch (size) {
 	case REG_32BIT:

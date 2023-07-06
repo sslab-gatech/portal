@@ -189,8 +189,10 @@ void bl31_main(void)
 	// block memory regions based on filter 
 
 	// block SMMU
+#if 1
 	if( !gpt_set_portal(SMMU_BASE, SMMU_REG_SIZE) )
 		WARN("Building portal for smmu failed\n");
+#endif 
 
 
 
