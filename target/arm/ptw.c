@@ -219,8 +219,6 @@ static bool granule_protection_check(CPUARMState *env, uint64_t paddress,
     MemTxResult result;
     int gpi;
 
-    if (paddress == 0x9050000)
-	    printf("pspace:%d\n", pspace);
     if (!FIELD_EX64(gpccr, GPCCR, GPC)) {
         return true;
     }
@@ -372,9 +370,7 @@ static bool granule_protection_check(CPUARMState *env, uint64_t paddress,
     case 0b1010: //ROOT
     case 0b1011: //REALM
 	if( gpi == 0b1010) {
-		printf("this is ROOT access\n");
-		printf("psapce:%x\n", pspace);
-		printf("paddress:%lx\n", paddress);
+		printf("[%s] ROOT_GPT_PSI: pspace:%d paddress:0x%lx\n", __func__, pspace, paddress);
 	}
         if (pspace == (gpi & 3)) {
             return true;
@@ -1817,7 +1813,8 @@ static bool get_phys_addr_lpae(CPUARMState *env, S1Translate *ptw,
             nse = extract32(attrs, 11, 1);
             out_space = (nse << 1) | ns;
 	    if (address ==0x9050000)
-		    printf("nse:%d ns:%d\n", nse, ns);
+		    printf("[%s]: page table attribute flags [nse]:%d [ns]:%d\n",
+				   __func__, nse, ns);
             if (out_space == ARMSS_Secure &&
                 !cpu_isar_feature(aa64_sel2, cpu)) {
                 out_space = ARMSS_NonSecure;
@@ -1895,10 +1892,10 @@ static bool get_phys_addr_lpae(CPUARMState *env, S1Translate *ptw,
     result->f.attrs.space = out_space;
     result->f.attrs.secure = arm_space_is_secure(out_space);
     if (address == 0x9050000) {
-	    printf("after\n");
-	    printf("ptw->in_space:%d\n", ptw->in_space);
-	    printf("result->f.attrs.space:%d\n", result->f.attrs.space);
-	    printf("result->f.attrs.secure:%d\n", result->f.attrs.secure);
+	    printf("[%s] ptw->in_space:%d, result->f.attrs.space:%d, result->f.attrs.secure:%d\n", 
+			    __func__, ptw->in_space, result->f.attrs.space, result->f.attrs.secure);
+	    printf("[%s] Exception level:%d\n", __func__, regime_el(env, mmu_idx));
+	    printf("[%s] ttbr:%d\n", __func__, param.select);
     }
 
     /* When in aarch64 mode, and BTI is enabled, remember GP in the TLB.  */
@@ -3150,11 +3147,6 @@ static bool get_phys_addr_nogpc(CPUARMState *env, S1Translate *ptw,
      */
     result->f.attrs.secure = is_secure;
     result->f.attrs.space = ptw->in_space;
-    if (address == 0x9050000) {
-	    printf("ptw->in_space:%d\n", ptw->in_space);
-	    printf("result->f.attrs.space:%d\n", result->f.attrs.space);
-	    printf("mmu_idx:%d\n", mmu_idx);
-    }
     switch (mmu_idx) {
     case ARMMMUIdx_Phys_S:
     case ARMMMUIdx_Phys_NS:
@@ -3252,6 +3244,10 @@ static bool get_phys_addr_nogpc(CPUARMState *env, S1Translate *ptw,
                                       is_secure, result, fi);
     }
 
+    if (address == 0x9050000) {
+	    printf("[%s] ptw->in_space:%d, result->f.attrs.space:%d\n", 
+			    __func__, ptw->in_space, result->f.attrs.space);
+    }
     if (regime_using_lpae_format(env, mmu_idx)) {
         return get_phys_addr_lpae(env, ptw, address, access_type, result, fi);
     } else if (arm_feature(env, ARM_FEATURE_V7) ||
@@ -3271,8 +3267,6 @@ static bool get_phys_addr_gpc(CPUARMState *env, S1Translate *ptw,
     if (get_phys_addr_nogpc(env, ptw, address, access_type, result, fi)) {
         return true;
     }
-    if (address == 0x9050000)
-	    printf("result->f.attrs.space:%d\n", result->f.attrs.space);
     if (!granule_protection_check(env, result->f.phys_addr,
                                   result->f.attrs.space, fi)) {
         fi->type = ARMFault_GPCFOnOutput;
@@ -3362,7 +3356,8 @@ bool get_phys_addr(CPUARMState *env, target_ulong address,
     ptw.in_space = ss;
     ptw.in_secure = arm_space_is_secure(ss);
     if (address == 0x9050000)
-	    printf("address:%lx in_space:%d in_secure:%d\n", address, ss, arm_space_is_secure(ss));
+	    printf("[%s]mmu_idx:0x%x address:0x%lx in_space:%d in_secure:%d\n", 
+			    __func__, mmu_idx, address, ss, arm_space_is_secure(ss));
     return get_phys_addr_gpc(env, &ptw, address, access_type, result, fi);
 }
 
