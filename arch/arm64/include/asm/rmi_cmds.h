@@ -267,7 +267,10 @@ static inline u32 portal_readl_smmu_reg (phys_addr_t addr)
 
 	arm_smccc_1_1_invoke(SMC_PMI_READ_SMMU_REG, addr, REG_32BIT , &res);
 
-	return (u32)res.a0; 
+	if (res.a0)
+		return (u32)res.a1;
+	else 
+		return -1;
 }
 
 #endif
