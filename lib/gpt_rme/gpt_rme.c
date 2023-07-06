@@ -1332,5 +1332,5 @@ int gpt_set_portal (uint64_t base, size_t size)
 		INFO("[GPT] Granule 0x%" PRIx64 ", GPI 0x%x->0x%x\n",
 			target_base, gpi_info.gpi, target_pas);
 	}
-	return 0;
+	return 1;
 }
