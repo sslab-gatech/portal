@@ -262,7 +262,7 @@ call following function orders.
 
 ```cpp
 sync_exception_aarch64 -> handle_sync_exception -> sync_handler64 -> std_svc_smc_handler -> rmmd_rmm_el3_handler -> rmmd_rmm_sync_exit
-                                                                  -> el3_exit
+                                                                  -> el3_exit (to rmm)
 ```
 
 
@@ -1157,3 +1157,6 @@ I cannot understand this code snippet.
 
 
 
+## EL3 xlat 
+setup_page_tables ->  mmap_add -> mmap_add_ctx -> mmap_add_region_ctx -> xlat_tables_map_region 
+-> xlat_desc -> xlat_arch_get_pas (return bits corresponding to the pas)
