@@ -8,6 +8,7 @@
 
 #include <lib/gpt_rme/gpt_rme.h>
 #include <plat/arm/common/arm_def.h>
+#include <drivers/arm/smmu_v3.h>
 
 /*****************************************************************************
  * PAS regions used to initialize the Granule Protection Table (GPT)
@@ -79,9 +80,14 @@
 #define	ARM_PAS_4_BASE			ARM_DRAM2_BASE
 #define	ARM_PAS_4_SIZE			((ULL(1) << 31)) /* 2GB */
 
-#define ARM_PAS_GPI_ANY			MAP_GPT_REGION(ARM_PAS_1_BASE, \
-						       ARM_PAS_1_SIZE, \
-						       GPT_GPI_ANY)
+#define ARM_PAS_GPI_ANY			MAP_GPT_REGION((ARM_PAS_1_BASE,        \
+						    	       ARM_PAS_1_SIZE, \
+						       	       GPT_GPI_ANY)
+
+//Generate GPT mapping for the IO region..
+#define ARM_PAS_SMMU			GPT_MAP_REGION_GRANULE(SMMU_BASE,      \
+						    	       SMMU_REG_SIZE,  \
+						       	       GPT_GPI_ROOT)
 
 #define	ARM_PAS_KERNEL			GPT_MAP_REGION_GRANULE(ARM_PAS_2_BASE, \
 							       ARM_PAS_2_SIZE, \
