@@ -226,7 +226,7 @@ uint64_t rmmd_rmm_el3_handler(uint32_t smc_fid,
 	((_fid & 0x00FE0000) == 0U)); })
 
 #define PMI_READ_SMMU_REG		SMC64_PMI_FID(U(0))
-#define PMI_WRITE_SMMU_REG		SMC64_PMI_FID(U(0))
+#define PMI_WRITE_SMMU_REG		SMC64_PMI_FID(U(1))
 
 
 enum regSize {

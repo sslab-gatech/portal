@@ -14,6 +14,7 @@
 #include <lib/xlat_tables/xlat_tables_defs.h>
 #include <plat/arm/common/smccc_def.h>
 #include <plat/common/common_def.h>
+#include <platform_def.h>
 
 /******************************************************************************
  * Definitions common to all ARM standard platforms
@@ -441,6 +442,12 @@ MEASURED_BOOT
 						ARM_L0_GPT_SIZE,		\
 						MT_MEMORY | MT_RW | MT_ROOT)
 #endif
+
+#if ENABLE_PORTAL
+#define ARM_MAP_PORTAL_REGION		MAP_REGION_FLAT(SMMU_BASE,	\
+						SMMU_REG_SIZE,		\
+						MT_MEMORY | MT_RW | MT_ROOT)
+#endif 
 
 /*
  * The max number of regions like RO(code), coherent and data required by

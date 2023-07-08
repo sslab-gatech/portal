@@ -390,6 +390,11 @@ void __init arm_bl31_plat_arch_setup(void)
 #if ENABLE_RME
 		ARM_MAP_L0_GPT_REGION,
 #endif
+
+#if ENABLE_PORTAL
+		ARM_MAP_PORTAL_REGION,
+
+#endif 
 #if RECLAIM_INIT_CODE
 		MAP_BL_INIT_CODE,
 #endif
@@ -406,6 +411,8 @@ void __init arm_bl31_plat_arch_setup(void)
 #endif
 		{0}
 	};
+
+	const mmap_region_t *regions = bl_regions;
 
 	setup_page_tables(bl_regions, plat_arm_get_mmap());
 

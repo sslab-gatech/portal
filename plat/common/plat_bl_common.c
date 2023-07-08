@@ -116,7 +116,7 @@ void __init setup_page_tables(const mmap_region_t *bl_regions,
 	const mmap_region_t *regions = bl_regions;
 
 	while (regions->size != 0U) {
-		VERBOSE("Region: 0x%lx - 0x%lx has attributes 0x%x\n",
+		INFO("Region: 0x%lx - 0x%lx has attributes 0x%x\n",
 				regions->base_va,
 				regions->base_va + regions->size,
 				regions->attr);

@@ -11,18 +11,6 @@
 #include <lib/utils_def.h>
 #include <platform_def.h>
 
-
-#ifndef SMMU_BASE
-#ifdef PLAT_FVP_SMMUV3_BASE
-#define SMMU_BASE       PLAT_FVP_SMMUV3_BASE
-#define SMMU_REG_SIZE   PLAT_ARM_SMMUV3_ROOT_REG_OFFSET
-
-#elif PLAT_QEMU_SMMUV3_BASE
-#define SMMU_BASE       PLAT_QEMU_SMMUV3_BASE
-#define SMMU_REG_SIZE   PLAT_ARM_SMMUV3_ROOT_REG_OFFSET
-#endif
-#endif 
-
 /* SMMUv3 register offsets from device base */
 #define SMMU_CR0	U(0x0020)
 #define SMMU_CR0ACK	U(0x0024)

@@ -204,8 +204,10 @@ int smmuv3_ns_set_abort_all(uintptr_t smmu_base)
 
 int read_smmu_reg(uint64_t reg_addr, int size, uint64_t *val) 
 {
-	if (!is_within_smmu_regs (reg_addr))
+	if (!is_within_smmu_regs (reg_addr)){
+		WARN("SMMU regs are not within the legitimate region");
 		return 0;
+	}
 #if 0
 	uint64_t scr_el3_val = 0;
 	asm volatile(
@@ -245,5 +247,4 @@ int read_smmu_reg(uint64_t reg_addr, int size, uint64_t *val)
 
 	INFO("Read value: %lx\n", *val);
 	return 1;
-
 }
