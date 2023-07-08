@@ -412,8 +412,6 @@ void __init arm_bl31_plat_arch_setup(void)
 		{0}
 	};
 
-	const mmap_region_t *regions = bl_regions;
-
 	setup_page_tables(bl_regions, plat_arm_get_mmap());
 
 	enable_mmu_el3(0);
