@@ -3113,7 +3113,7 @@ static int arm_smmu_write_reg_sync(struct arm_smmu_device *smmu, u32 val,
 	u32 reg;
 
 	writel_portal_relaxed(val, smmu->base + reg_off);
-	return readl_relaxed_poll_timeout(smmu->base + ack_off, reg, reg == val,
+	return readl_portal_relaxed_poll_timeout(smmu->base + ack_off, reg, reg == val,
 					  1, ARM_SMMU_POLL_TIMEOUT_US);
 }
 
@@ -3123,7 +3123,7 @@ static int arm_smmu_update_gbpa(struct arm_smmu_device *smmu, u32 set, u32 clr)
 	int ret;
 	u32 reg, __iomem *gbpa = smmu->base + ARM_SMMU_GBPA;
 
-	ret = readl_relaxed_poll_timeout(gbpa, reg, !(reg & GBPA_UPDATE),
+	ret = readl_portal_relaxed_poll_timeout(gbpa, reg, !(reg & GBPA_UPDATE),
 					 1, ARM_SMMU_POLL_TIMEOUT_US);
 	if (ret)
 		return ret;
@@ -3131,7 +3131,7 @@ static int arm_smmu_update_gbpa(struct arm_smmu_device *smmu, u32 set, u32 clr)
 	reg &= ~clr;
 	reg |= set;
 	writel_portal_relaxed(reg | GBPA_UPDATE, gbpa);
-	ret = readl_relaxed_poll_timeout(gbpa, reg, !(reg & GBPA_UPDATE),
+	ret = readl_portal_relaxed_poll_timeout(gbpa, reg, !(reg & GBPA_UPDATE),
 					 1, ARM_SMMU_POLL_TIMEOUT_US);
 
 	if (ret)

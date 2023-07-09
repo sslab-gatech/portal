@@ -819,5 +819,13 @@ static inline u32 writeq_portal_relaxed(u64 data, unsigned long addr)
 {
         return portal_writeq_smmu_reg(data, xlate_virt_to_phys(addr));
 }
+
+//ignore sleep before/timeout_us cause smc call consumes more than sleep time.. 
+#define readl_portal_relaxed_poll_timeout(addr, reg, cond, sleep_before, timeout_us) \ 
+({ \
+	reg = portal_readl_smmu_reg(xlate_virt_to_phys(addr)); \
+	(cond) ? 0 : -ETIMEDOUT;  \
+}) 
+
 #endif /* CONFIG_ARM_SMMU_V3_SVA */
 #endif /* _ARM_SMMU_V3_H */

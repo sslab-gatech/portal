@@ -297,5 +297,4 @@ static inline u32 portal_writeq_smmu_reg (u64 data, phys_addr_t addr)
 }
 
 
-
 #endif
