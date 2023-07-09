@@ -7,7 +7,6 @@
 #define __ASM_RMI_CMDS_H
 
 #include <linux/arm-smccc.h>
-
 #include <asm/rmi_smc.h>
 
 struct rtt_entry {
@@ -272,5 +271,31 @@ static inline u32 portal_readl_smmu_reg (phys_addr_t addr)
 	else 
 		return -1;
 }
+
+static inline u32 portal_writel_smmu_reg (u32 data, phys_addr_t addr)
+{
+	struct arm_smccc_res res; 
+
+	arm_smccc_1_1_invoke(SMC_PMI_WRITE_SMMU_REG, data, addr, REG_32BIT, &res);
+
+	if (res.a0)
+		return 0;
+	else 
+		return -1;
+}
+
+static inline u32 portal_writeq_smmu_reg (u64 data, phys_addr_t addr)
+{
+	struct arm_smccc_res res; 
+
+	arm_smccc_1_1_invoke(SMC_PMI_WRITE_SMMU_REG, data, addr, REG_64BIT, &res);
+
+	if (res.a0)
+		return 0;
+	else 
+		return -1;
+}
+
+
 
 #endif

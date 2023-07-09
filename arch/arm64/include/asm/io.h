@@ -185,9 +185,4 @@ extern bool arch_memremap_can_ram_remap(resource_size_t offset, size_t size,
 #define arch_memremap_can_ram_remap arch_memremap_can_ram_remap
 
 
-static inline u32 readl_portal_relaxed(phys_addr_t addr)
-{
-        return portal_readl_smmu_reg(addr);
-}
-
 #endif	/* __ASM_IO_H */

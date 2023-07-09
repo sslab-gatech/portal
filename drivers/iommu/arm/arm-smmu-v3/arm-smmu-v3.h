@@ -801,5 +801,23 @@ static inline void arm_smmu_sva_remove_dev_pasid(struct iommu_domain *domain,
 						 ioasid_t id)
 {
 }
+
+
+static phys_addr_t xlate_virt_to_phys(unsigned long virtual_address);
+
+static inline u32 readl_portal_relaxed(unsigned long addr)
+{
+        return portal_readl_smmu_reg(xlate_virt_to_phys(addr));
+}
+
+static inline u32 writel_portal_relaxed(u32 data, unsigned long addr)
+{
+        return portal_writel_smmu_reg(data, xlate_virt_to_phys(addr));
+}
+
+static inline u32 writeq_portal_relaxed(u64 data, unsigned long addr)
+{
+        return portal_writeq_smmu_reg(data, xlate_virt_to_phys(addr));
+}
 #endif /* CONFIG_ARM_SMMU_V3_SVA */
 #endif /* _ARM_SMMU_V3_H */

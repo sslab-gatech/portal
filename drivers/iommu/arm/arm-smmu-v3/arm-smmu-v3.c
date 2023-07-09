@@ -147,7 +147,7 @@ static void queue_sync_cons_out(struct arm_smmu_queue *q)
 	 * are complete before we update the cons pointer.
 	 */
 	__iomb();
-	writel_relaxed(q->llq.cons, q->cons_reg);
+	writel_portal_relaxed(q->llq.cons, q->cons_reg);
 }
 
 static void queue_inc_cons(struct arm_smmu_ll_queue *q)
@@ -373,7 +373,7 @@ static void __arm_smmu_cmdq_skip_err(struct arm_smmu_device *smmu,
 
 	int i;
 	u64 cmd[CMDQ_ENT_DWORDS];
-	u32 cons = readl_relaxed(q->cons_reg);
+	u32 cons = readl_portal_relaxed(q->cons_reg);
 	u32 idx = FIELD_GET(CMDQ_CONS_ERR, cons);
 	struct arm_smmu_cmdq_ent cmd_sync = {
 		.opcode = CMDQ_OP_CMD_SYNC,
@@ -595,7 +595,7 @@ static int arm_smmu_cmdq_poll_until_not_full(struct arm_smmu_device *smmu,
 	 * that fails, spin until somebody else updates it for us.
 	 */
 	if (arm_smmu_cmdq_exclusive_trylock_irqsave(cmdq, flags)) {
-		WRITE_ONCE(cmdq->q.llq.cons, readl_relaxed(cmdq->q.cons_reg));
+		WRITE_ONCE(cmdq->q.llq.cons, readl_portal_relaxed(cmdq->q.cons_reg));
 		arm_smmu_cmdq_exclusive_unlock_irqrestore(cmdq, flags);
 		llq->val = READ_ONCE(cmdq->q.llq.val);
 		return 0;
@@ -817,7 +817,7 @@ static int arm_smmu_cmdq_issue_cmdlist(struct arm_smmu_device *smmu,
 		 * d. Advance the hardware prod pointer
 		 * Control dependency ordering from the entries becoming valid.
 		 */
-		writel_relaxed(prod, cmdq->q.prod_reg);
+		writel_portal_relaxed(prod, cmdq->q.prod_reg);
 
 		/*
 		 * e. Tell the next owner we're done
@@ -835,8 +835,8 @@ static int arm_smmu_cmdq_issue_cmdlist(struct arm_smmu_device *smmu,
 			dev_err_ratelimited(smmu->dev,
 					    "CMD_SYNC timeout at 0x%08x [hwprod 0x%08x, hwcons 0x%08x]\n",
 					    llq.prod,
-					    readl_relaxed(cmdq->q.prod_reg),
-					    readl_relaxed(cmdq->q.cons_reg));
+					    readl_portal_relaxed(cmdq->q.prod_reg),
+					    readl_portal_relaxed(cmdq->q.cons_reg));
 		}
 
 		/*
@@ -1653,8 +1653,8 @@ static irqreturn_t arm_smmu_gerror_handler(int irq, void *dev)
 	u32 gerror, gerrorn, active;
 	struct arm_smmu_device *smmu = dev;
 
-	gerror = readl_relaxed(smmu->base + ARM_SMMU_GERROR);
-	gerrorn = readl_relaxed(smmu->base + ARM_SMMU_GERRORN);
+	gerror = readl_portal_relaxed(smmu->base + ARM_SMMU_GERROR);
+	gerrorn = readl_portal_relaxed(smmu->base + ARM_SMMU_GERRORN);
 
 	active = gerror ^ gerrorn;
 	if (!(active & GERROR_ERR_MASK))
@@ -3112,7 +3112,7 @@ static int arm_smmu_write_reg_sync(struct arm_smmu_device *smmu, u32 val,
 {
 	u32 reg;
 
-	writel_relaxed(val, smmu->base + reg_off);
+	writel_portal_relaxed(val, smmu->base + reg_off);
 	return readl_relaxed_poll_timeout(smmu->base + ack_off, reg, reg == val,
 					  1, ARM_SMMU_POLL_TIMEOUT_US);
 }
@@ -3130,7 +3130,7 @@ static int arm_smmu_update_gbpa(struct arm_smmu_device *smmu, u32 set, u32 clr)
 
 	reg &= ~clr;
 	reg |= set;
-	writel_relaxed(reg | GBPA_UPDATE, gbpa);
+	writel_portal_relaxed(reg | GBPA_UPDATE, gbpa);
 	ret = readl_relaxed_poll_timeout(gbpa, reg, !(reg & GBPA_UPDATE),
 					 1, ARM_SMMU_POLL_TIMEOUT_US);
 
@@ -3155,9 +3155,9 @@ static void arm_smmu_write_msi_msg(struct msi_desc *desc, struct msi_msg *msg)
 	doorbell = (((u64)msg->address_hi) << 32) | msg->address_lo;
 	doorbell &= MSI_CFG0_ADDR_MASK;
 
-	writeq_relaxed(doorbell, smmu->base + cfg[0]);
-	writel_relaxed(msg->data, smmu->base + cfg[1]);
-	writel_relaxed(ARM_SMMU_MEMATTR_DEVICE_nGnRE, smmu->base + cfg[2]);
+	writeq_portal_relaxed(doorbell, smmu->base + cfg[0]);
+	writel_portal_relaxed(msg->data, smmu->base + cfg[1]);
+	writel_portal_relaxed(ARM_SMMU_MEMATTR_DEVICE_nGnRE, smmu->base + cfg[2]);
 }
 
 static void arm_smmu_setup_msis(struct arm_smmu_device *smmu)
@@ -3166,11 +3166,11 @@ static void arm_smmu_setup_msis(struct arm_smmu_device *smmu)
 	struct device *dev = smmu->dev;
 
 	/* Clear the MSI address regs */
-	writeq_relaxed(0, smmu->base + ARM_SMMU_GERROR_IRQ_CFG0);
-	writeq_relaxed(0, smmu->base + ARM_SMMU_EVTQ_IRQ_CFG0);
+	writeq_portal_relaxed(0, smmu->base + ARM_SMMU_GERROR_IRQ_CFG0);
+	writeq_portal_relaxed(0, smmu->base + ARM_SMMU_EVTQ_IRQ_CFG0);
 
 	if (smmu->features & ARM_SMMU_FEAT_PRI)
-		writeq_relaxed(0, smmu->base + ARM_SMMU_PRIQ_IRQ_CFG0);
+		writeq_portal_relaxed(0, smmu->base + ARM_SMMU_PRIQ_IRQ_CFG0);
 	else
 		nvec--;
 
@@ -3302,7 +3302,7 @@ static int arm_smmu_device_reset(struct arm_smmu_device *smmu, bool bypass)
 	struct arm_smmu_cmdq_ent cmd;
 
 	/* Clear CR0 and sync (disables SMMU and queue processing) */
-	reg = readl_relaxed(smmu->base + ARM_SMMU_CR0);
+	reg = readl_portal_relaxed(smmu->base + ARM_SMMU_CR0);
 	if (reg & CR0_SMMUEN) {
 		dev_warn(smmu->dev, "SMMU currently enabled! Resetting...\n");
 		WARN_ON(is_kdump_kernel() && !disable_bypass);
@@ -3320,7 +3320,7 @@ static int arm_smmu_device_reset(struct arm_smmu_device *smmu, bool bypass)
 	      FIELD_PREP(CR1_QUEUE_SH, ARM_SMMU_SH_ISH) |
 	      FIELD_PREP(CR1_QUEUE_OC, CR1_CACHE_WB) |
 	      FIELD_PREP(CR1_QUEUE_IC, CR1_CACHE_WB);
-	writel_relaxed(reg, smmu->base + ARM_SMMU_CR1);
+	writel_portal_relaxed(reg, smmu->base + ARM_SMMU_CR1);
 
 	/* CR2 (random crap) */
 	reg = CR2_PTM | CR2_RECINVSID;
@@ -3328,18 +3328,18 @@ static int arm_smmu_device_reset(struct arm_smmu_device *smmu, bool bypass)
 	if (smmu->features & ARM_SMMU_FEAT_E2H)
 		reg |= CR2_E2H;
 
-	writel_relaxed(reg, smmu->base + ARM_SMMU_CR2);
+	writel_portal_relaxed(reg, smmu->base + ARM_SMMU_CR2);
 
 	/* Stream table */
-	writeq_relaxed(smmu->strtab_cfg.strtab_base,
+	writeq_portal_relaxed(smmu->strtab_cfg.strtab_base,
 		       smmu->base + ARM_SMMU_STRTAB_BASE);
-	writel_relaxed(smmu->strtab_cfg.strtab_base_cfg,
+	writel_portal_relaxed(smmu->strtab_cfg.strtab_base_cfg,
 		       smmu->base + ARM_SMMU_STRTAB_BASE_CFG);
 
 	/* Command queue */
-	writeq_relaxed(smmu->cmdq.q.q_base, smmu->base + ARM_SMMU_CMDQ_BASE);
-	writel_relaxed(smmu->cmdq.q.llq.prod, smmu->base + ARM_SMMU_CMDQ_PROD);
-	writel_relaxed(smmu->cmdq.q.llq.cons, smmu->base + ARM_SMMU_CMDQ_CONS);
+	writeq_portal_relaxed(smmu->cmdq.q.q_base, smmu->base + ARM_SMMU_CMDQ_BASE);
+	writel_portal_relaxed(smmu->cmdq.q.llq.prod, smmu->base + ARM_SMMU_CMDQ_PROD);
+	writel_portal_relaxed(smmu->cmdq.q.llq.cons, smmu->base + ARM_SMMU_CMDQ_CONS);
 
 	enables = CR0_CMDQEN;
 	ret = arm_smmu_write_reg_sync(smmu, enables, ARM_SMMU_CR0,
@@ -3363,9 +3363,9 @@ static int arm_smmu_device_reset(struct arm_smmu_device *smmu, bool bypass)
 	arm_smmu_cmdq_issue_cmd_with_sync(smmu, &cmd);
 
 	/* Event queue */
-	writeq_relaxed(smmu->evtq.q.q_base, smmu->base + ARM_SMMU_EVTQ_BASE);
-	writel_relaxed(smmu->evtq.q.llq.prod, smmu->page1 + ARM_SMMU_EVTQ_PROD);
-	writel_relaxed(smmu->evtq.q.llq.cons, smmu->page1 + ARM_SMMU_EVTQ_CONS);
+	writeq_portal_relaxed(smmu->evtq.q.q_base, smmu->base + ARM_SMMU_EVTQ_BASE);
+	writel_portal_relaxed(smmu->evtq.q.llq.prod, smmu->page1 + ARM_SMMU_EVTQ_PROD);
+	writel_portal_relaxed(smmu->evtq.q.llq.cons, smmu->page1 + ARM_SMMU_EVTQ_CONS);
 
 	enables |= CR0_EVTQEN;
 	ret = arm_smmu_write_reg_sync(smmu, enables, ARM_SMMU_CR0,
@@ -3377,11 +3377,11 @@ static int arm_smmu_device_reset(struct arm_smmu_device *smmu, bool bypass)
 
 	/* PRI queue */
 	if (smmu->features & ARM_SMMU_FEAT_PRI) {
-		writeq_relaxed(smmu->priq.q.q_base,
+		writeq_portal_relaxed(smmu->priq.q.q_base,
 			       smmu->base + ARM_SMMU_PRIQ_BASE);
-		writel_relaxed(smmu->priq.q.llq.prod,
+		writel_portal_relaxed(smmu->priq.q.llq.prod,
 			       smmu->page1 + ARM_SMMU_PRIQ_PROD);
-		writel_relaxed(smmu->priq.q.llq.cons,
+		writel_portal_relaxed(smmu->priq.q.llq.cons,
 			       smmu->page1 + ARM_SMMU_PRIQ_CONS);
 
 		enables |= CR0_PRIQEN;
@@ -3430,52 +3430,6 @@ static int arm_smmu_device_reset(struct arm_smmu_device *smmu, bool bypass)
 	return 0;
 }
 
-static phys_addr_t xlate_virt_to_phys(unsigned long virtual_address)
-{
-	pgd_t *pgd;
-	p4d_t *p4d;
-	pud_t *pud;
-	pmd_t *pmd;
-	pte_t *pte;
-	phys_addr_t physical_address = 0;
-	
-	pgd = pgd_offset_k(virtual_address);
-	if (pgd_none(*pgd) || unlikely(pgd_bad(*pgd)))
-		goto out;
-
-	printk("%llx\n", pgd_val(*pgd));
-
-	p4d = p4d_offset(pgd, virtual_address);
-	if (p4d_none(*p4d) || unlikely(p4d_bad(*p4d)))
-		goto out;
-
-	printk("%llx\n", p4d_val(*p4d));
-
-	pud = pud_offset(p4d, virtual_address);
-	if (pud_none(*pud) || unlikely(pud_bad(*pud)))
-		goto out;
-
-	printk("%llx\n", pud_val(*pud));
-	
-	pmd = pmd_offset(pud, virtual_address);
-	if (pmd_none(*pmd) || unlikely(pmd_bad(*pmd)))
-		goto out;
-
-	printk("%llx\n", pmd_val(*pmd));
-	
-	pte = pte_offset_kernel(pmd, virtual_address);
-	if (!pte || !pte_present(*pte))
-		goto out;
-	
-	printk("%llx\n", pte_val(*pte));
-
-	physical_address = (pte_pfn(*pte) << PAGE_SHIFT) | (virtual_address & ~PAGE_MASK);
-
-out:
-	printk("%s: VirtAddr(%lx) -> PhyAddr(%llx)\n", __func__, virtual_address, physical_address);
-	return physical_address;
-}
-
 // check smmu registers and initialize relevant kernel structures
 static int arm_smmu_device_hw_probe(struct arm_smmu_device *smmu)
 {
@@ -3484,7 +3438,7 @@ static int arm_smmu_device_hw_probe(struct arm_smmu_device *smmu)
 
 	/* IDR0 */
 	//reg = readl_relaxed(smmu->base + ARM_SMMU_IDR0);
-	reg = readl_portal_relaxed(xlate_virt_to_phys(smmu->base + ARM_SMMU_IDR0));
+	reg = readl_portal_relaxed(smmu->base + ARM_SMMU_IDR0);
 	printk("value read from portal:%x\n", reg);
 
 	/* 2-level structures */
@@ -3584,7 +3538,7 @@ static int arm_smmu_device_hw_probe(struct arm_smmu_device *smmu)
 
 	/* IDR1 */
 	printk("readl_relaex\n");
-	reg = readl_relaxed(smmu->base + ARM_SMMU_IDR1);
+	reg = readl_portal_relaxed(smmu->base + ARM_SMMU_IDR1);
 	printk("readl_relaex done\n");
 
 	if (reg & (IDR1_TABLES_PRESET | IDR1_QUEUES_PRESET | IDR1_REL)) {
@@ -3625,12 +3579,12 @@ static int arm_smmu_device_hw_probe(struct arm_smmu_device *smmu)
 		smmu->features &= ~ARM_SMMU_FEAT_2_LVL_STRTAB;
 
 	/* IDR3 */
-	reg = readl_relaxed(smmu->base + ARM_SMMU_IDR3);
+	reg = readl_portal_relaxed(smmu->base + ARM_SMMU_IDR3);
 	if (FIELD_GET(IDR3_RIL, reg))
 		smmu->features |= ARM_SMMU_FEAT_RANGE_INV;
 
 	/* IDR5 */
-	reg = readl_relaxed(smmu->base + ARM_SMMU_IDR5);
+	reg = readl_portal_relaxed(smmu->base + ARM_SMMU_IDR5);
 
 	/* Maximum number of outstanding stalls */
 	smmu->evtq.max_stalls = FIELD_GET(IDR5_STALL_MAX, reg);
@@ -3958,6 +3912,48 @@ static struct platform_driver arm_smmu_driver = {
 };
 module_driver(arm_smmu_driver, platform_driver_register,
 	      arm_smmu_driver_unregister);
+
+static phys_addr_t xlate_virt_to_phys(unsigned long virtual_address)
+{
+	pgd_t *pgd;
+	p4d_t *p4d;
+	pud_t *pud;
+	pmd_t *pmd;
+	pte_t *pte;
+	phys_addr_t physical_address = 0;
+	
+	pgd = pgd_offset_k(virtual_address);
+	if (pgd_none(*pgd) || unlikely(pgd_bad(*pgd)))
+		goto out;
+
+
+	p4d = p4d_offset(pgd, virtual_address);
+	if (p4d_none(*p4d) || unlikely(p4d_bad(*p4d)))
+		goto out;
+
+
+	pud = pud_offset(p4d, virtual_address);
+	if (pud_none(*pud) || unlikely(pud_bad(*pud)))
+		goto out;
+
+	
+	pmd = pmd_offset(pud, virtual_address);
+	if (pmd_none(*pmd) || unlikely(pmd_bad(*pmd)))
+		goto out;
+
+	
+	pte = pte_offset_kernel(pmd, virtual_address);
+	if (!pte || !pte_present(*pte))
+		goto out;
+	
+
+	physical_address = (pte_pfn(*pte) << PAGE_SHIFT) | (virtual_address & ~PAGE_MASK);
+
+out:
+	printk("%s: VirtAddr(%lx) -> PhyAddr(%llx)\n", __func__, virtual_address, physical_address);
+	return physical_address;
+}
+
 
 MODULE_DESCRIPTION("IOMMU API for ARM architected SMMUv3 implementations");
 MODULE_AUTHOR("Will Deacon <will@kernel.org>");
