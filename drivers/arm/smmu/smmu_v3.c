@@ -208,29 +208,6 @@ int read_smmu_reg(uint64_t reg_addr, int size, uint64_t *val)
 		WARN("SMMU regs are not within the legitimate region");
 		return 0;
 	}
-#if 0
-	uint64_t scr_el3_val = 0;
-	asm volatile(
-		"mrs %0, scr_el3\n\t"
-		:"=r"(scr_el3_val)
-		:
-		:"memory"
-	);
-	INFO("scr_el3:%lx\n", scr_el3_val);
-	//configure NSE/NS bit 
-	asm volatile(
-		"mrs %0, scr_el3\n\t"
-		"mov x18, %0\n\t"
-		"bfi x18, x18, 62, 1\n\t"
-		"and x18, x18, ~1\n\t"
-		"msr scr_el3, x18\n\t"
-		"mrs %0, scr_el3\n\t"
-		:"=r"(scr_el3_val) 
-		:
-		:"memory", "x18"
-	);
-	INFO("scr_el3:%lx\n", scr_el3_val);
-#endif 
 
 	switch (size) {
 	case REG_32BIT:
@@ -246,5 +223,36 @@ int read_smmu_reg(uint64_t reg_addr, int size, uint64_t *val)
 	}
 
 	INFO("Read value: %lx\n", *val);
+	return 1;
+}
+
+int write_smmu_reg(uint64_t data, uint64_t reg_addr, int size)
+{
+	if (!is_within_smmu_regs (reg_addr)){
+		WARN("SMMU regs are not within the legitimate region");
+		return 0;
+	}
+
+	switch (size) {
+	case REG_32BIT:
+		INFO("%s:writing 0x%x to reg %lx\n", __func__, (uint32_t)data, reg_addr);
+		mmio_write_32(reg_addr, (uint32_t)data);
+		if (mmio_read_32(reg_addr) != data) {
+			WARN("Write failed\n");
+			return 0;
+		}
+		break;
+	case REG_64BIT:
+		INFO("%s:writing 0x%lx to reg%lx\n", __func__, data, reg_addr);
+		mmio_write_64(reg_addr, data);
+		if (mmio_read_64(reg_addr) != data) {
+			WARN("Write failed\n");
+			return 0;
+		}
+		break;
+	default:
+		break;
+	}
+
 	return 1;
 }

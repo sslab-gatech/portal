@@ -70,5 +70,5 @@ int smmuv3_security_init(uintptr_t smmu_base);
 int smmuv3_ns_set_abort_all(uintptr_t smmu_base);
 
 int read_smmu_reg(uint64_t reg_addr, int size, uint64_t *val);
-
+int write_smmu_reg(uint64_t data, uint64_t reg_addr, int size);
 #endif /* SMMU_V3_H */

@@ -468,6 +468,9 @@ uint64_t pmi_handler(uint32_t smc_fid, uint64_t x1, uint64_t x2,
 	case PMI_READ_SMMU_REG:
 		ret = read_smmu_reg(x1, x2, &res1);
 		SMC_RET2(handle, ret, res1);
+	case PMI_WRITE_SMMU_REG:
+		ret = write_smmu_reg(x1, x2, x3);
+		SMC_RET1(handle, ret);
 	default:
 		WARN("PMMD: Unsupported PMI call 0x%08x\n", smc_fid);
 		SMC_RET1(handle, SMC_UNK);
