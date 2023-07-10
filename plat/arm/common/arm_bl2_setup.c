@@ -136,7 +136,9 @@ static void arm_bl2_plat_gpt_setup(void)
 	 * the layout, so the array cannot be constant.
 	 */
 	pas_region_t pas_regions[] = {
-		ARM_PAS_SMMU, 	//for IO
+#if ENABLE_PORTAL
+		ARM_PAS_SMMU, //building GPT l1 table entries for smmu
+#endif 
 		ARM_PAS_KERNEL,
 		ARM_PAS_SECURE,
 		ARM_PAS_REALM,
