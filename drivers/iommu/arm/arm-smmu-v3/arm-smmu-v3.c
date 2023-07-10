@@ -3439,7 +3439,6 @@ static int arm_smmu_device_hw_probe(struct arm_smmu_device *smmu)
 	/* IDR0 */
 	//reg = readl_relaxed(smmu->base + ARM_SMMU_IDR0);
 	reg = readl_portal_relaxed(smmu->base + ARM_SMMU_IDR0);
-	printk("value read from portal:%x\n", reg);
 
 	/* 2-level structures */
 	if (FIELD_GET(IDR0_ST_LVL, reg) == IDR0_ST_LVL_2LVL)
@@ -3537,9 +3536,7 @@ static int arm_smmu_device_hw_probe(struct arm_smmu_device *smmu)
 	smmu->vmid_bits = reg & IDR0_VMID16 ? 16 : 8;
 
 	/* IDR1 */
-	printk("readl_relaex\n");
 	reg = readl_portal_relaxed(smmu->base + ARM_SMMU_IDR1);
-	printk("readl_relaex done\n");
 
 	if (reg & (IDR1_TABLES_PRESET | IDR1_QUEUES_PRESET | IDR1_REL)) {
 		dev_err(smmu->dev, "embedded implementation not supported\n");
@@ -3953,6 +3950,8 @@ out:
 	printk("%s: VirtAddr(%lx) -> PhyAddr(%llx)\n", __func__, virtual_address, physical_address);
 	return physical_address;
 }
+
+
 
 
 MODULE_DESCRIPTION("IOMMU API for ARM architected SMMUv3 implementations");

@@ -805,27 +805,49 @@ static inline void arm_smmu_sva_remove_dev_pasid(struct iommu_domain *domain,
 
 static phys_addr_t xlate_virt_to_phys(unsigned long virtual_address);
 
-static inline u32 readl_portal_relaxed(unsigned long addr)
+
+#define ENABLE_PORTAL 0
+
+static inline u32 readl_portal_relaxed(const volatile void __iomem *addr)
 {
-        return portal_readl_smmu_reg(xlate_virt_to_phys(addr));
+#if ENABLE_PORTAL
+        return portal_readl_smmu_reg(xlate_virt_to_phys((unsigned long)addr));
+#else
+        return readl_relaxed(addr);
+#endif 
 }
 
-static inline u32 writel_portal_relaxed(u32 data, unsigned long addr)
+
+static inline void writel_portal_relaxed(u32 data, volatile void *addr)
 {
-        return portal_writel_smmu_reg(data, xlate_virt_to_phys(addr));
+#if ENABLE_PORTAL
+        portal_writel_smmu_reg(data, xlate_virt_to_phys((unsigned long)addr));
+#else
+        writel_relaxed(data, addr);
+#endif 
 }
 
-static inline u32 writeq_portal_relaxed(u64 data, unsigned long addr)
+static inline void writeq_portal_relaxed(u64 data, volatile void *addr)
 {
-        return portal_writeq_smmu_reg(data, xlate_virt_to_phys(addr));
+#if ENABLE_PORTAL
+        portal_writeq_smmu_reg(data, xlate_virt_to_phys((unsigned long)addr));
+#else 
+        writeq_relaxed(data, addr);
+#endif 
 }
 
+#if ENABLE_PORTAL 
 //ignore sleep before/timeout_us cause smc call consumes more than sleep time.. 
 #define readl_portal_relaxed_poll_timeout(addr, reg, cond, sleep_before, timeout_us) \ 
 ({ \
-	reg = portal_readl_smmu_reg(xlate_virt_to_phys(addr)); \
+	reg = portal_readl_smmu_reg(xlate_virt_to_phys((unsigned long)addr)); \
 	(cond) ? 0 : -ETIMEDOUT;  \
 }) 
+
+#else 
+//TODO: Refactor other functions like below..
+#define readl_portal_relaxed_poll_timeout readl_relaxed_poll_timeout
+#endif
 
 #endif /* CONFIG_ARM_SMMU_V3_SVA */
 #endif /* _ARM_SMMU_V3_H */
