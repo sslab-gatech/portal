@@ -1291,35 +1291,65 @@ static void arm_smmu_write_strtab_ent(struct arm_smmu_master *master, u32 sid,
 
 
 ## Map physical memories for device through IOMMU
+Now the Stream table and CDs are all initialized for the device to utilize the 
+IOMMU for translation. Now let's see how the device driver associated with the 
+device can actually access the DRAM through the SMMU translation. To understand 
+it, we should have a deep understanding about the dma sub-system of the kernel. 
+
+### IOVA -> Physical address translation 
+IOMMU makes use of IOVA which is the virtual address that the IOMMU connected 
+device can access. The real accesses to the DRAM is achieved through the SMMU 
+as a result of IOVA to physical address translation. Therefore, the first job 
+of the IOMMU sub system is generating the IOVA that can be accessible from the 
+device and host processor simultaneously. After the IOVA generation, it should 
+be mapped to the physical addresses through manipulating the page table managed 
+by the IOMMU. Therefore, when the dma_alloc_XX series of functions are invoked 
+in the kernel, it will first invoke the iommu_dma_alloc function. 
+
+
 ```cpp
-dma_addr_t dma_map_page_attrs(struct device *dev, struct page *page,
-                size_t offset, size_t size, enum dma_data_direction dir,
-                unsigned long attrs)
+static inline void *dma_alloc_coherent(struct device *dev, size_t size,
+                dma_addr_t *dma_handle, gfp_t gfp)
+{       
+        return dma_alloc_attrs(dev, size, dma_handle, gfp,
+                        (gfp & __GFP_NOWARN) ? DMA_ATTR_NO_WARN : 0);
+}      
+
+```cpp
+void *dma_alloc_attrs(struct device *dev, size_t size, dma_addr_t *dma_handle,
+                gfp_t flag, unsigned long attrs)
 {
         const struct dma_map_ops *ops = get_dma_ops(dev);
-        dma_addr_t addr;
+        void *cpu_addr;
 
-        BUG_ON(!valid_dma_direction(dir));
+        WARN_ON_ONCE(!dev->coherent_dma_mask);
 
-        if (WARN_ON_ONCE(!dev->dma_mask))
-                return DMA_MAPPING_ERROR;
+        /*
+         * DMA allocations can never be turned back into a page pointer, so
+         * requesting compound pages doesn't make sense (and can't even be
+         * supported at all by various backends).
+         */
+        if (WARN_ON_ONCE(flag & __GFP_COMP))
+                return NULL;
 
-        if (dma_map_direct(dev, ops) ||
-            arch_dma_map_page_direct(dev, page_to_phys(page) + offset + size))
-                addr = dma_direct_map_page(dev, page, offset, size, dir, attrs);
+        if (dma_alloc_from_dev_coherent(dev, size, dma_handle, &cpu_addr))
+                return cpu_addr;
+
+        /* let the implementation decide on the zone to allocate from: */
+        flag &= ~(__GFP_DMA | __GFP_DMA32 | __GFP_HIGHMEM);
+
+        if (dma_alloc_direct(dev, ops))
+                cpu_addr = dma_direct_alloc(dev, size, dma_handle, flag, attrs);
+        else if (ops->alloc)
+                cpu_addr = ops->alloc(dev, size, dma_handle, flag, attrs);
         else
-                addr = ops->map_page(dev, page, offset, size, dir, attrs);
-        kmsan_handle_dma(page, offset, size, dir);
-        debug_dma_map_page(dev, page, offset, size, dir, addr, attrs);
+                return NULL;
 
-        return addr;
+        debug_dma_alloc_coherent(dev, size, *dma_handle, cpu_addr, attrs);
+        return cpu_addr;
 }
+EXPORT_SYMBOL(dma_alloc_attrs);
 ```
-
-When the device didn't set up the SMMU in its driver, then it will invoke DMA
-related functions. However, because we assume that the target is connected to 
-the SMMU, so it will invoke dma_map_ops set by the iommu driver. 
-
 
 ```cpp
 static const struct dma_map_ops iommu_dma_ops = {
@@ -1346,65 +1376,86 @@ static const struct dma_map_ops iommu_dma_ops = {
         .opt_mapping_size       = iommu_dma_opt_mapping_size,
 };
 ```
-
-The ops->map_page function will invoke iommu_dma_map_page function if the dev
-is connected to the iommu subsystem.
+The ops->map_page function will invoke ommu_dma_alloc function if the dev is 
+connected to the iommu subsystem.
 
 ```cpp
-static dma_addr_t iommu_dma_map_page(struct device *dev, struct page *page,
-                unsigned long offset, size_t size, enum dma_data_direction dir,
-                unsigned long attrs)
-{               
-        phys_addr_t phys = page_to_phys(page) + offset;
+static void *iommu_dma_alloc(struct device *dev, size_t size,
+                dma_addr_t *handle, gfp_t gfp, unsigned long attrs)
+{
         bool coherent = dev_is_dma_coherent(dev);
-        int prot = dma_info_to_prot(dir, coherent, attrs);
-        struct iommu_domain *domain = iommu_get_dma_domain(dev);
-        struct iommu_dma_cookie *cookie = domain->iova_cookie;
-        struct iova_domain *iovad = &cookie->iovad;
-        dma_addr_t iova, dma_mask = dma_get_mask(dev);
-                
-        /*                                    
-         * If both the physical buffer start address and size are
-         * page aligned, we don't need to use a bounce page.
-         */             
-        if (dev_use_swiotlb(dev) && iova_offset(iovad, phys | size)) {
-                void *padding_start;
-                size_t padding_size, aligned_size;
-                
-                if (!is_swiotlb_active(dev)) {
-                        dev_warn_once(dev, "DMA bounce buffers are inactive, unable to map unaligned transaction.\n");
-                        return DMA_MAPPING_ERROR;
-                }       
-                        
-                aligned_size = iova_align(iovad, size);
-                phys = swiotlb_tbl_map_single(dev, phys, size, aligned_size,
-                                              iova_mask(iovad), dir, attrs);
-        
-                if (phys == DMA_MAPPING_ERROR)
-                        return DMA_MAPPING_ERROR;
-                
-                /* Cleanup the padding area. */
-                padding_start = phys_to_virt(phys);
-                padding_size = aligned_size;
-                
-                if (!(attrs & DMA_ATTR_SKIP_CPU_SYNC) &&
-                    (dir == DMA_TO_DEVICE || dir == DMA_BIDIRECTIONAL)) {
-                        padding_start += size;
-                        padding_size -= size;
-                }
-                memset(padding_start, 0, padding_size);
+        int ioprot = dma_info_to_prot(DMA_BIDIRECTIONAL, coherent, attrs);
+        struct page *page = NULL;
+        void *cpu_addr;
+
+        gfp |= __GFP_ZERO;
+
+        if (gfpflags_allow_blocking(gfp) &&
+            !(attrs & DMA_ATTR_FORCE_CONTIGUOUS)) {
+                return iommu_dma_alloc_remap(dev, size, handle, gfp,
+                                dma_pgprot(dev, PAGE_KERNEL, attrs), attrs);
         }
 
-        if (!coherent && !(attrs & DMA_ATTR_SKIP_CPU_SYNC))
-                arch_sync_dma_for_device(phys, size, dir);
+        if (IS_ENABLED(CONFIG_DMA_DIRECT_REMAP) &&
+            !gfpflags_allow_blocking(gfp) && !coherent)
+                page = dma_alloc_from_pool(dev, PAGE_ALIGN(size), &cpu_addr,
+                                               gfp, NULL);
+        else
+                cpu_addr = iommu_dma_alloc_pages(dev, size, &page, gfp, attrs);
+        if (!cpu_addr)
+                return NULL;
 
-        iova = __iommu_dma_map(dev, phys, size, prot, dma_mask);
-        if (iova == DMA_MAPPING_ERROR && is_swiotlb_buffer(dev, phys))
-                swiotlb_tbl_unmap_single(dev, phys, size, dir, attrs);
-        return iova;
+        *handle = __iommu_dma_map(dev, page_to_phys(page), size, ioprot,
+                        dev->coherent_dma_mask);
+        if (*handle == DMA_MAPPING_ERROR) {
+                __iommu_dma_free(dev, size, cpu_addr);
+                return NULL;
+        }
+
+        return cpu_addr;
+}
+```
+### IOVA allocation
+```cpp
+static void *iommu_dma_alloc_pages(struct device *dev, size_t size,
+                struct page **pagep, gfp_t gfp, unsigned long attrs)
+{
+        bool coherent = dev_is_dma_coherent(dev);
+        size_t alloc_size = PAGE_ALIGN(size);
+        int node = dev_to_node(dev);
+        struct page *page = NULL;
+        void *cpu_addr;
+
+        page = dma_alloc_contiguous(dev, alloc_size, gfp);
+        if (!page)
+                page = alloc_pages_node(node, gfp, get_order(alloc_size));
+        if (!page)
+                return NULL;
+
+        if (!coherent || PageHighMem(page)) {
+                pgprot_t prot = dma_pgprot(dev, PAGE_KERNEL, attrs);
+
+                cpu_addr = dma_common_contiguous_remap(page, alloc_size,
+                                prot, __builtin_return_address(0));
+                if (!cpu_addr)
+                        goto out_free_pages;
+
+                if (!coherent)
+                        arch_dma_prep_coherent(page, size);
+        } else {
+                cpu_addr = page_address(page);
+        }
+
+        *pagep = page;
+        memset(cpu_addr, 0, alloc_size);
+        return cpu_addr;
+out_free_pages:
+        dma_free_contiguous(dev, page, alloc_size);
+        return NULL;
 }
 ```
 
+### Generating IOVA->PA mapping
 ```cpp
 static dma_addr_t __iommu_dma_map(struct device *dev, phys_addr_t phys,
                 size_t size, int prot, u64 dma_mask)
@@ -1433,8 +1484,88 @@ static dma_addr_t __iommu_dma_map(struct device *dev, phys_addr_t phys,
 }
 ```
 
-iommu_map_atomic -> _iommu_map -> __iommu_map -> __iommu_map_pages
+```cpp
+int iommu_map_atomic(struct iommu_domain *domain, unsigned long iova,
+              phys_addr_t paddr, size_t size, int prot)
+{       
+        return _iommu_map(domain, iova, paddr, size, prot, GFP_ATOMIC);
+}               
 
+static int _iommu_map(struct iommu_domain *domain, unsigned long iova,
+                      phys_addr_t paddr, size_t size, int prot, gfp_t gfp)
+{       
+        const struct iommu_domain_ops *ops = domain->ops;
+        int ret;
+
+        ret = __iommu_map(domain, iova, paddr, size, prot, gfp);
+        if (ret == 0 && ops->iotlb_sync_map)
+                ops->iotlb_sync_map(domain, iova, size);
+
+        return ret;
+	}       
+
+```
+
+```cpp
+static int __iommu_map(struct iommu_domain *domain, unsigned long iova,
+                       phys_addr_t paddr, size_t size, int prot, gfp_t gfp)
+{
+        const struct iommu_domain_ops *ops = domain->ops;
+        unsigned long orig_iova = iova;
+        unsigned int min_pagesz;
+        size_t orig_size = size;
+        phys_addr_t orig_paddr = paddr;
+        int ret = 0;
+
+        if (unlikely(!(ops->map || ops->map_pages) ||
+                     domain->pgsize_bitmap == 0UL))
+                return -ENODEV;
+
+        if (unlikely(!(domain->type & __IOMMU_DOMAIN_PAGING)))
+                return -EINVAL;
+
+        /* find out the minimum page size supported */
+        min_pagesz = 1 << __ffs(domain->pgsize_bitmap);
+
+        /*
+         * both the virtual address and the physical one, as well as
+         * the size of the mapping, must be aligned (at least) to the
+         * size of the smallest page supported by the hardware
+         */
+        if (!IS_ALIGNED(iova | paddr | size, min_pagesz)) {
+                pr_err("unaligned: iova 0x%lx pa %pa size 0x%zx min_pagesz 0x%x\n",
+                       iova, &paddr, size, min_pagesz);
+                return -EINVAL;
+        }
+
+        pr_debug("map: iova 0x%lx pa %pa size 0x%zx\n", iova, &paddr, size);
+
+        while (size) {
+                size_t mapped = 0;
+
+                ret = __iommu_map_pages(domain, iova, paddr, size, prot, gfp,
+                                        &mapped);
+                /*
+                 * Some pages may have been mapped, even if an error occurred,
+                 * so we should account for those so they can be unmapped.
+                 */
+                size -= mapped;
+
+                if (ret)
+                        break;
+
+                iova += mapped;
+                paddr += mapped;
+        }
+
+        /* unroll mapping in case something went wrong */
+        if (ret)
+                iommu_unmap(domain, orig_iova, orig_size - size);
+        else
+                trace_map(orig_iova, orig_paddr, orig_size);
+
+        return ret;
+```
 
 ```cpp
 static int __iommu_map_pages(struct iommu_domain *domain, unsigned long iova,
@@ -1461,12 +1592,71 @@ static int __iommu_map_pages(struct iommu_domain *domain, unsigned long iova,
         return ret;
 }
 ```
+Through this long IOMMU subsystem layers, it finally invokes the map / map_pages
+functions of the SMMU. Now the iommu abstraction ends and it invokes the funcs
+stored in the iommu_domain_ops to handle IOMMU instance specific functions. As
+the current domain is set as SMMU, functions invoked through the 
+iommu_domain_ops will be the SMMU functions to set-up related data structures to 
+enable the iommu mapping. 
 
-Now the iommu abstraction ends and it invokes the iommu_domain_ops to call the 
-functions assigned for handling specific iommu instance. As the current domain
-is set as SMMU, functions invoked through the iommu_domain_ops will be the SMMU
-functions to set-up related data structures to enable the iommu mapping. 
 
+```cpp
+static struct iommu_domain *__iommu_domain_alloc(struct bus_type *bus,
+                                                 unsigned type)
+{       
+        struct iommu_domain *domain;
+        
+        if (bus == NULL || bus->iommu_ops == NULL)
+                return NULL;
+        
+        domain = bus->iommu_ops->domain_alloc(type);
+        if (!domain)
+                return NULL; 
+                             
+        domain->type = type;
+        /* Assume all sizes by default; the driver may override this later */
+        domain->pgsize_bitmap = bus->iommu_ops->pgsize_bitmap;
+        if (!domain->ops)
+                domain->ops = bus->iommu_ops->default_domain_ops;
+        
+        if (iommu_is_dma_domain(domain) && iommu_get_dma_cookie(domain)) {
+                iommu_domain_free(domain);
+                domain = NULL;
+        }       
+        return domain;
+}
+```
+
+```cpp
+static struct iommu_ops arm_smmu_ops = {
+        .capable                = arm_smmu_capable,
+        .domain_alloc           = arm_smmu_domain_alloc,
+        .probe_device           = arm_smmu_probe_device,
+        .release_device         = arm_smmu_release_device,
+        .device_group           = arm_smmu_device_group,
+        .of_xlate               = arm_smmu_of_xlate,
+        .get_resv_regions       = arm_smmu_get_resv_regions,
+        .remove_dev_pasid       = arm_smmu_remove_dev_pasid,
+        .dev_enable_feat        = arm_smmu_dev_enable_feature,
+        .dev_disable_feat       = arm_smmu_dev_disable_feature,
+        .page_response          = arm_smmu_page_response,
+        .def_domain_type        = arm_smmu_def_domain_type,
+        .pgsize_bitmap          = -1UL, /* Restricted during device attach */
+        .owner                  = THIS_MODULE,
+        .default_domain_ops = &(const struct iommu_domain_ops) {
+                .attach_dev             = arm_smmu_attach_dev,
+                .map_pages              = arm_smmu_map_pages,
+                .unmap_pages            = arm_smmu_unmap_pages,
+                .flush_iotlb_all        = arm_smmu_flush_iotlb_all,
+                .iotlb_sync             = arm_smmu_iotlb_sync,
+                .iova_to_phys           = arm_smmu_iova_to_phys,
+                .enable_nesting         = arm_smmu_enable_nesting,
+                .free                   = arm_smmu_domain_free,
+        }
+};
+```
+This map functions are initialized when the device is attached to the SMMU.
+Therefore, the map function will end up invoking the arm_smmu_map_pages.
 
 ```cpp
 static int arm_smmu_map_pages(struct iommu_domain *domain, unsigned long iova,
@@ -1481,6 +1671,219 @@ static int arm_smmu_map_pages(struct iommu_domain *domain, unsigned long iova,
         return ops->map_pages(ops, iova, paddr, pgsize, pgcount, prot, gfp, mapped);
 }
 ```
+
+Now finally through the domain, it invokes the map_pages function set in the 
+pgtbl_ops. Note that the functions have been set for managing the SMMU specific
+data structures to manipulate the page tables and relevant data structures in 
+finalizing domain (refer to alloc_io_pgtable_ops). The map_pages function of the 
+retrieved pgtbl_ops is arm_lpae_map_pages.
+
+```cpp
+static int arm_lpae_map_pages(struct io_pgtable_ops *ops, unsigned long iova,
+                              phys_addr_t paddr, size_t pgsize, size_t pgcount,
+                              int iommu_prot, gfp_t gfp, size_t *mapped)
+{
+        struct arm_lpae_io_pgtable *data = io_pgtable_ops_to_data(ops);
+        struct io_pgtable_cfg *cfg = &data->iop.cfg;
+        arm_lpae_iopte *ptep = data->pgd;
+        int ret, lvl = data->start_level;
+        arm_lpae_iopte prot;
+        long iaext = (s64)iova >> cfg->ias;
+
+        if (WARN_ON(!pgsize || (pgsize & cfg->pgsize_bitmap) != pgsize))
+                return -EINVAL;
+
+        if (cfg->quirks & IO_PGTABLE_QUIRK_ARM_TTBR1)
+                iaext = ~iaext;
+        if (WARN_ON(iaext || paddr >> cfg->oas))
+                return -ERANGE;
+
+        /* If no access, then nothing to do */
+        if (!(iommu_prot & (IOMMU_READ | IOMMU_WRITE)))
+                return 0;
+
+        prot = arm_lpae_prot_to_pte(data, iommu_prot);
+        ret = __arm_lpae_map(data, iova, paddr, pgsize, pgcount, prot, lvl,
+                             ptep, gfp, mapped);
+        /*
+         * Synchronise all PTE updates for the new mapping before there's
+         * a chance for anything to kick off a table walk for the new iova.
+         */
+        wmb();
+
+        return ret;
+}
+```
+
+```cpp
+static int __arm_lpae_map(struct arm_lpae_io_pgtable *data, unsigned long iova,
+                          phys_addr_t paddr, size_t size, size_t pgcount,
+                          arm_lpae_iopte prot, int lvl, arm_lpae_iopte *ptep,
+                          gfp_t gfp, size_t *mapped)
+{
+        arm_lpae_iopte *cptep, pte;
+        size_t block_size = ARM_LPAE_BLOCK_SIZE(lvl, data);
+        size_t tblsz = ARM_LPAE_GRANULE(data);
+        struct io_pgtable_cfg *cfg = &data->iop.cfg;
+        int ret = 0, num_entries, max_entries, map_idx_start;
+
+        /* Find our entry at the current level */
+        map_idx_start = ARM_LPAE_LVL_IDX(iova, lvl, data);
+        ptep += map_idx_start;
+
+        /* If we can install a leaf entry at this level, then do so */
+        if (size == block_size) {
+                max_entries = ARM_LPAE_PTES_PER_TABLE(data) - map_idx_start;
+                num_entries = min_t(int, pgcount, max_entries);
+                ret = arm_lpae_init_pte(data, iova, paddr, prot, lvl, num_entries, ptep);
+                if (!ret)
+                        *mapped += num_entries * size;
+
+                return ret;
+        }
+
+        /* We can't allocate tables at the final level */
+        if (WARN_ON(lvl >= ARM_LPAE_MAX_LEVELS - 1))
+                return -EINVAL;
+
+        /* Grab a pointer to the next level */
+        pte = READ_ONCE(*ptep);
+        if (!pte) {
+                cptep = __arm_lpae_alloc_pages(tblsz, gfp, cfg);
+                if (!cptep)
+                        return -ENOMEM;
+
+                pte = arm_lpae_install_table(cptep, ptep, 0, data);
+                if (pte)
+                        __arm_lpae_free_pages(cptep, tblsz, cfg);
+        } else if (!cfg->coherent_walk && !(pte & ARM_LPAE_PTE_SW_SYNC)) {
+                __arm_lpae_sync_pte(ptep, 1, cfg);
+        }
+
+        if (pte && !iopte_leaf(pte, lvl, data->iop.fmt)) {
+                cptep = iopte_deref(pte, data);
+        } else if (pte) {
+                /* We require an unmap first */
+                WARN_ON(!selftest_running);
+                return -EEXIST;
+        }
+
+        /* Rinse, repeat */
+        return __arm_lpae_map(data, iova, paddr, size, pgcount, prot, lvl + 1,
+                              cptep, gfp, mapped);
+}
+```
+
+```cpp
+static arm_lpae_iopte arm_lpae_install_table(arm_lpae_iopte *table,
+                                             arm_lpae_iopte *ptep,
+                                             arm_lpae_iopte curr,
+                                             struct arm_lpae_io_pgtable *data)
+{
+        arm_lpae_iopte old, new;
+        struct io_pgtable_cfg *cfg = &data->iop.cfg;
+
+        new = paddr_to_iopte(__pa(table), data) | ARM_LPAE_PTE_TYPE_TABLE;
+        if (cfg->quirks & IO_PGTABLE_QUIRK_ARM_NS)
+                new |= ARM_LPAE_PTE_NSTABLE;
+
+        /*
+         * Ensure the table itself is visible before its PTE can be.
+         * Whilst we could get away with cmpxchg64_release below, this
+         * doesn't have any ordering semantics when !CONFIG_SMP.
+         */
+        dma_wmb();
+
+        old = cmpxchg64_relaxed(ptep, curr, new);
+
+        if (cfg->coherent_walk || (old & ARM_LPAE_PTE_SW_SYNC))
+                return old;
+
+        /* Even if it's not ours, there's no point waiting; just kick it */
+        __arm_lpae_sync_pte(ptep, 1, cfg);
+        if (old == curr)
+                WRITE_ONCE(*ptep, new | ARM_LPAE_PTE_SW_SYNC);
+
+        return old;
+}
+```
+When the next level page table entries do not exist, it should be generated (by
+the __arm_lpae_alloc_pages) and pointed to by the current level page table entry
+pointer (done by arm_lpae_install_table). Since the page table used by the smmu 
+is same as of MMU page table, it consists of multiple levels. Therefore, after 
+handling the current level, it invokes the same function to handle next level 
+until the IOVA is mapped to the physical address. When it reaches to the target 
+size of the IOVA, it invokes arm_lpae_init_pte function to generate last page 
+table entry. 
+
+```cpp
+static int arm_lpae_init_pte(struct arm_lpae_io_pgtable *data,
+                             unsigned long iova, phys_addr_t paddr,
+                             arm_lpae_iopte prot, int lvl, int num_entries,
+                             arm_lpae_iopte *ptep)
+{
+        int i;
+
+        for (i = 0; i < num_entries; i++) 
+                if (iopte_leaf(ptep[i], lvl, data->iop.fmt)) {
+                        /* We require an unmap first */
+                        WARN_ON(!selftest_running);
+                        return -EEXIST;
+                } else if (iopte_type(ptep[i]) == ARM_LPAE_PTE_TYPE_TABLE) {
+                        /*   
+                         * We need to unmap and free the old table before
+                         * overwriting it with a block entry.
+                         */
+                        arm_lpae_iopte *tblp;
+                        size_t sz = ARM_LPAE_BLOCK_SIZE(lvl, data);
+
+                        tblp = ptep - ARM_LPAE_LVL_IDX(iova, lvl, data);
+                        if (__arm_lpae_unmap(data, NULL, iova + i * sz, sz, 1,
+                                             lvl, tblp) != sz) {
+                                WARN_ON(1);
+                                return -EINVAL;
+                        }    
+                }    
+
+        __arm_lpae_init_pte(data, paddr, prot, lvl, num_entries, ptep);
+        return 0;
+}
+```
+
+As the dma allocation usually requires chunk of pages at one function call, it 
+needs to allocate multiple contiguous pages for servicing one DMA call. Before 
+updating the PTE, it first checks whether all pages are unmapped and is ready 
+to be mapped with same block size.
+
+```cpp
+static void __arm_lpae_init_pte(struct arm_lpae_io_pgtable *data,
+                                phys_addr_t paddr, arm_lpae_iopte prot,
+                                int lvl, int num_entries, arm_lpae_iopte *ptep)
+{
+        arm_lpae_iopte pte = prot;
+        struct io_pgtable_cfg *cfg = &data->iop.cfg;
+        size_t sz = ARM_LPAE_BLOCK_SIZE(lvl, data);
+        int i;
+
+        if (data->iop.fmt != ARM_MALI_LPAE && lvl == ARM_LPAE_MAX_LEVELS - 1)
+                pte |= ARM_LPAE_PTE_TYPE_PAGE;
+        else
+                pte |= ARM_LPAE_PTE_TYPE_BLOCK;
+
+        for (i = 0; i < num_entries; i++)
+                ptep[i] = pte | paddr_to_iopte(paddr + i * sz, data);
+
+        if (!cfg->coherent_walk)
+                __arm_lpae_sync_pte(ptep, num_entries, cfg);
+}
+```
+
+Based on whether it is 4KB or larger block it sets PAGE type in the pte and 
+writes the content to the ptep! After allocating all pages, it synchronize 
+pte by submitting smmu commands. 
+
+
+
 
 
 ## Appendix 
@@ -1659,61 +2062,3 @@ in the stream table to access the secure memory.
 
 
 ## Appendix
-__iommu_attach_device -> domain->ops->attach_dev(domain, dev) -> arm_smmu_attach_dev
-
-```cpp
-static struct iommu_domain *__iommu_domain_alloc(struct bus_type *bus,
-                                                 unsigned type)
-{       
-        struct iommu_domain *domain;
-        
-        if (bus == NULL || bus->iommu_ops == NULL)
-                return NULL;
-        
-        domain = bus->iommu_ops->domain_alloc(type);
-        if (!domain)
-                return NULL; 
-                             
-        domain->type = type;
-        /* Assume all sizes by default; the driver may override this later */
-        domain->pgsize_bitmap = bus->iommu_ops->pgsize_bitmap;
-        if (!domain->ops)
-                domain->ops = bus->iommu_ops->default_domain_ops;
-        
-        if (iommu_is_dma_domain(domain) && iommu_get_dma_cookie(domain)) {
-                iommu_domain_free(domain);
-                domain = NULL;
-        }       
-        return domain;
-}
-```
-
-
-```cpp
-static struct iommu_ops arm_smmu_ops = {
-        .capable                = arm_smmu_capable,
-        .domain_alloc           = arm_smmu_domain_alloc,
-        .probe_device           = arm_smmu_probe_device,
-        .release_device         = arm_smmu_release_device,
-        .device_group           = arm_smmu_device_group,
-        .of_xlate               = arm_smmu_of_xlate,
-        .get_resv_regions       = arm_smmu_get_resv_regions,
-        .remove_dev_pasid       = arm_smmu_remove_dev_pasid,
-        .dev_enable_feat        = arm_smmu_dev_enable_feature,
-        .dev_disable_feat       = arm_smmu_dev_disable_feature,
-        .page_response          = arm_smmu_page_response,
-        .def_domain_type        = arm_smmu_def_domain_type,
-        .pgsize_bitmap          = -1UL, /* Restricted during device attach */
-        .owner                  = THIS_MODULE,
-        .default_domain_ops = &(const struct iommu_domain_ops) {
-                .attach_dev             = arm_smmu_attach_dev,
-                .map_pages              = arm_smmu_map_pages,
-                .unmap_pages            = arm_smmu_unmap_pages,
-                .flush_iotlb_all        = arm_smmu_flush_iotlb_all,
-                .iotlb_sync             = arm_smmu_iotlb_sync,
-                .iova_to_phys           = arm_smmu_iova_to_phys,
-                .enable_nesting         = arm_smmu_enable_nesting,
-                .free                   = arm_smmu_domain_free,
-        }
-};
-```
