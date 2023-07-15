@@ -638,8 +638,10 @@ Granules enforced by the hardware are managed by the tf-a, but the RMM also
 maintains the mirror of the granule so that it can handles SMC calls related 
 with the granules without communicating to the tf-a every time. 
 
+
 ### RMM maintained granule array
 ```cpp
+static struct granule granules[RMM_MAX_GRANULES];
 struct granule {
         /*
          * @lock protects the struct granule itself. Take this lock whenever
@@ -801,6 +803,7 @@ enum granule_state {
         GRANULE_STATE_LAST = GRANULE_STATE_RTT
 };
 ```
+
 There should be NS PAS or REALM PAS page in terms of GPT, but the RMM layer can
 utilize software concept to distinguish one page based on its usage. 
 
@@ -856,7 +859,18 @@ virtual address, which allows fast mapping. For this, RMM maintains cache of the
 page table associated with those virtual address instead of walking entire page 
 table for every page mapping. 
 
-ns_granule_map -> buffer_arch_map(buffer_map_internal) -> xlat_map_memory_page_with_attrs -> ns_buffer_unmap
+ns_granule_map -> buffer_arch_map(buffer_map_internal) -> 
+xlat_map_memory_page_with_attrs -> ns_buffer_unmap
+
+```cpp
+static void *ns_granule_map(enum buffer_slot slot, struct granule *granule)
+{
+        unsigned long addr = granule_addr(granule);
+
+        assert(is_ns_slot(slot));
+        return buffer_arch_map(slot, addr);
+}
+```
 
 ```cpp
 void *buffer_map_internal(enum buffer_slot slot, unsigned long addr)
@@ -878,39 +892,392 @@ void *buffer_map_internal(enum buffer_slot slot, unsigned long addr)
         return (void *)va;
 }               
 ```
-
 As shown in the above function, to retrieve the VA, it just passes the slot 
 indicating which page it is used for. The buffer has one slot per each different
-purposed page that is always mapped to different physical page dynamically. 
-Also, RMM maintains the last entries of the translation tables as a cache, so 
-instead of walking entire translation table to map the PA to designated VA, it 
-retrieves the table entries from the cache (get_cached_llt_info). With these 
-two information, it invokes xlat_map_memory_page_with_attrs function that maps
-the provided VA to PA utilizing the provided table information. 
+purposed page that can be mapped to different physical page dynamically. The 
+slot_to_va function returns va based on what type of the slot it is. Therefore,
+the virtual address used for mappings of specific type of slot is always same.
+
 
 xlat_map_memory_page_with_attrs -> xlat_get_tte_ptr (retrieve leaf entry)
                                 -> xlat_desc (generate new leaf descriptor)
                                 -> xlat_write_tte (write to the table)
 
-To conclude, RMM layer has capabilities to map any physical pages to any VA, but
-the mapping the granule pages are done by very limited interface but done in 
-very fast way. 
+Also, RMM maintains the last entries of the translation tables as a cache, so 
+instead of walking entire translation table to map the PA to fixed VA, it 
+retrieves the table entries from the cache (get_cached_llt_info). With these two
+information, it invokes xlat_map_memory_page_with_attrs function that maps the 
+provided VA to PA utilizing the provided table information. 
 
+To conclude, RMM layer has capabilities to map any physical pages to any VA, but
+it maps physical pages to handful of fixed virtual addresses so that it can map
+any physical pages in very fast way. In the below examples for handling RMI call,
+it is easy to see how this mapping is utilized for mapping NS_PAS and REALM_PAS
+physical memories are mapped to fixed virtual addresses based on its purpose 
+inside the RMM.
 
 ## SMC_RMM_REALM_CREATE
+```cpp
+unsigned long smc_realm_create(unsigned long rd_addr,
+                               unsigned long realm_params_addr)
+{       
+        rd = granule_map(g_rd, SLOT_RD);
+        set_rd_state(rd, REALM_STATE_NEW);
+        set_rd_rec_count(rd, 0UL);
+        rd->s2_ctx.g_rtt = find_granule(p.rtt_base);
+        rd->s2_ctx.ipa_bits = requested_ipa_bits(&p);
+        rd->s2_ctx.s2_starting_level = p.rtt_level_start;
+        rd->s2_ctx.num_root_rtts = p.rtt_num_start;
+        (void)memcpy(&rd->rpv[0], &p.rpv[0], RPV_SIZE);
+
+```
+Does it mean that rtt_base is non secure pointer locating the root of stage 2
+page table? No! The rtt_base should have been delegated before calling realm 
+create RMI. If it was not delegated, then the find_lock_rd_granules function 
+will return error and RMI will fail. 
+
+```cpp
+        for (i = 0U; i < p.rtt_num_start; i++) {
+                granule_unlock_transition(g_rtt_base + i, GRANULE_STATE_RTT);
+        }
+```
+Also at the end of realm creation it sets RTT memories as GRANULE_STATE_RTT to
+indicate this memory is used for RTT. 
+
+## SMC_RMM_RTT_CREATE
+Then how to create the RTT? Previous REALM_CREATE RMI just passes the root ptr 
+of the RTT and the size of root RTT so that RMM can delegate memories as the 
+RTT internally. 
+
+
+```cpp
+unsigned long smc_rtt_create(unsigned long rtt_addr, //pa of the target RTT (Realm Translation Table)
+                             unsigned long rd_addr,  
+                             unsigned long map_addr, //base of the IPA range described by the rtt 
+                             unsigned long ulevel) 
+{
+
+        if (!validate_rtt_structure_cmds(map_addr, level, rd)) {
+                buffer_unmap(rd);
+                granule_unlock(g_rd);
+                granule_unlock(g_tbl);
+                return RMI_ERROR_INPUT;
+        }
+
+        g_table_root = rd->s2_ctx.g_rtt;
+        sl = realm_rtt_starting_level(rd);
+        ipa_bits = realm_ipa_bits(rd);
+        s2_ctx = rd->s2_ctx;
+        buffer_unmap(rd);
+
+        /*
+         * Lock the RTT root. Enforcing locking order RD->RTT is enough to
+         * ensure deadlock free locking guarentee.
+         */
+        granule_lock(g_table_root, GRANULE_STATE_RTT);
+
+	rtt_walk_lock_unlock(g_table_root, sl, ipa_bits,
+                                map_addr, level - 1L, &wi);
+
+```
+Validation checks if the virtual address that will be mapped is within the 
+virtual address range that is allowed for the realm. 
+
+```cpp
+void rtt_walk_lock_unlock(struct granule *g_root, //granule of root s2 table
+                          int start_level,
+                          unsigned long ipa_bits,
+                          unsigned long map_addr,
+                          long level,
+                          struct rtt_walk *wi) 
+{                               
+        struct granule *g_tbls[NR_RTT_LEVELS] = { NULL };
+        unsigned long sl_idx;
+        int i, last_level;
+        
+        assert(start_level >= MIN_STARTING_LEVEL);
+        assert(level >= start_level);
+        assert(map_addr < (1UL << ipa_bits));
+        assert(wi != NULL);
+
+        /* Handle concatenated starting level (SL) tables */
+        sl_idx = s2_sl_addr_to_idx(map_addr, start_level, ipa_bits);
+        if (sl_idx >= S2TTES_PER_S2TT) {
+                unsigned int tt_num = (sl_idx >> S2TTE_STRIDE);
+                struct granule *g_concat_root = g_root + tt_num;
+                
+                granule_lock(g_concat_root, GRANULE_STATE_RTT);
+                granule_unlock(g_root);
+                g_root = g_concat_root;
+        }       
+
+        g_tbls[start_level] = g_root;
+        for (i = start_level; i < level; i++) {
+                /*
+                 * Lock next RTT level. Correct locking order is guaranteed
+                 * because reference is obtained from a locked granule
+                 * (previous level). Also, hand-over-hand locking/unlocking is
+                 * used to avoid race conditions.
+                 */
+                g_tbls[i + 1] = __find_lock_next_level(g_tbls[i], map_addr, i);
+                if (g_tbls[i + 1] == NULL) {
+                        last_level = i;
+                        goto out;
+                }
+                granule_unlock(g_tbls[i]);
+        }
+
+        last_level = level;
+out:
+        wi->last_level = last_level;
+        wi->g_llt = g_tbls[last_level];
+        wi->index = s2_addr_to_idx(map_addr, last_level);
+}
+```
+
+Although host passes pre-generated RTT entry to be set, but the RMM should walk
+the internal stage 2 page table to locate the RTT entry that should be set 
+because the RMM doesn't trust the host. As the level of the RTT and the IPA is 
+passed, by walking the stage 2 page table, it can locate the RTT that should be 
+updated according to the passed RTT. To this end, it first walks the page table 
+from the root to the destination level. RTT of each level from the root to the 
+destination is stored in the g_tbls array in the above code. 
+
+```cpp
+static struct granule *__find_lock_next_level(struct granule *g_tbl,
+                                              unsigned long map_addr,
+                                              long level)
+{
+        const unsigned long idx = s2_addr_to_idx(map_addr, level);
+        struct granule *g = __find_next_level_idx(g_tbl, idx);
+
+        if (g != NULL) {
+                granule_lock(g, GRANULE_STATE_RTT);
+        }
+
+        return g;
+}
+
+static unsigned long s2_addr_to_idx(unsigned long addr, long level)
+{
+        int levels = RTT_PAGE_LEVEL - level;
+        int lsb = levels * S2TTE_STRIDE + GRANULE_SHIFT;
+
+        addr >>= lsb;
+        addr &= (1UL << S2TTE_STRIDE) - 1;
+        return addr;
+}
+
+Based on what level it is, it can easily extract index of current level paging 
+from the virtual address that will be mapped. 
+
+static struct granule *__find_next_level_idx(struct granule *g_tbl,
+                                             unsigned long idx)
+{
+        const unsigned long entry = __table_get_entry(g_tbl, idx);
+                          
+        if (!entry_is_table(entry)) {
+                return NULL;
+        }                 
+        
+        return addr_to_granule(table_entry_to_phys(entry));
+}
+
+static unsigned long __table_get_entry(struct granule *g_tbl,
+                                       unsigned long idx) 
+{
+        unsigned long *table, entry;
+
+        table = granule_map(g_tbl, SLOT_RTT);
+        entry = s2tte_read(&table[idx]);
+        buffer_unmap(table);
+
+        return entry;
+}       
+```
+
+The function name is little bit confusing though, __find_next_level_idx returns
+the granule of the RTT entry associated with the target virtual address in 
+current level. Based on the index value extracted from the s2_addr_to_idx func, 
+it indexes into the stage2 page table at current level and locate the RTT entry
+of this level. 
+
+```cpp
+struct rtt_walk {
+        struct granule *g_llt;
+        unsigned long index;
+        long last_level;
+};
+```
+
+Therefore, the result of this loop in the main body of the rtt_walk_lock_unlock 
+is array containing granules of RTT of root to destination level. This info is 
+returned to the smc_rtt_create function through the rtt_walk structure. 
 
 
 
+```cpp
+        if (wi.last_level != level - 1L) {
+                ret = pack_return_code(RMI_ERROR_RTT, wi.last_level);
+                goto out_unlock_llt;
+        }
+```
 
+The important checking function following the RTT table walking is presented 
+above. This function checks the reported last level as a result of table walk
+is same as the level reported by the host. If the two value do not match, it 
+means that the host provided wrong information, and the previous level RTT 
+entry should be generated before this call! If the level matches, it is ready 
+to set up the RTT.
+
+The most important part of updating RTT in security perspective is checking the 
+validity of the update because RMM cannot trust the host.
+```cpp
+        parent_s2tt = granule_map(wi.g_llt, SLOT_RTT);       // Points to the table at level
+        parent_s2tte = s2tte_read(&parent_s2tt[wi.index]);   // The entry in the table (s2tt) pointing next level table
+        s2tt = granule_map(g_tbl, SLOT_DELEGATED);           // RTT entry that should be pointed to by the parent_s2tte
+```
+
+Because we currently have information of the granule mapped to the RTT entry 
+that needs to be updated, it should first map the granule and read its content.
+The reason it needs mapping of the parent s2tte is that it should update parent
+RTT to point to host provided RTT. Moreover, the newly updated RTT page should 
+be initialize to be used as RTT. To this end, it maps host provided RTT page 
+through its granule (g_tbl). It first initialize the new RTT page and update 
+parent RTT page accordingly. Let's see!
+
+```cpp
+        if (s2tte_is_unassigned(parent_s2tte)) {
+                /*
+                 * Note that if map_addr is an Unprotected IPA, the RIPAS field
+                 * is guaranteed to be zero, in both parent and child s2ttes.
+                 */
+                enum ripas ripas = s2tte_get_ripas(parent_s2tte);
+
+                s2tt_init_unassigned(s2tt, ripas);
+
+                /*
+                 * Increase the refcount of the parent, the granule was
+                 * locked while table walking and hand-over-hand locking.
+                 * Atomicity and acquire/release semantics not required because
+                 * the table is accessed always locked.
+                 */
+                __granule_get(wi.g_llt);
+
+        } else if (s2tte_is_destroyed(parent_s2tte)) {
+                s2tt_init_destroyed(s2tt);
+                __granule_get(wi.g_llt);
+
+        } else if (s2tte_is_assigned(parent_s2tte, level - 1L)) {
+                unsigned long block_pa;
+
+                /*
+                 * We should observe parent assigned s2tte only when
+                 * we create tables above this level.
+                 */
+                assert(level > RTT_MIN_BLOCK_LEVEL);
+
+                block_pa = s2tte_pa(parent_s2tte, level - 1L);
+
+                s2tt_init_assigned_empty(s2tt, block_pa, level);
+
+                /*
+                 * Increase the refcount to mark the granule as in-use. refcount
+                 * is incremented by S2TTES_PER_S2TT (ref RTT unfolding).
+                 */
+                __granule_refcount_inc(g_tbl, S2TTES_PER_S2TT);
+
+        } else if (s2tte_is_valid(parent_s2tte, level - 1L)) {
+                unsigned long block_pa;
+
+                /*
+                 * We should observe parent valid s2tte only when
+                 * we create tables above this level.
+                 */
+                assert(level > RTT_MIN_BLOCK_LEVEL);
+
+                /*
+                 * Break before make. This may cause spurious S2 aborts.
+                 */
+                s2tte_write(&parent_s2tt[wi.index], 0UL);
+                invalidate_block(&s2_ctx, map_addr);
+
+                block_pa = s2tte_pa(parent_s2tte, level - 1L);
+
+                s2tt_init_valid(s2tt, block_pa, level);
+
+                /*
+                 * Increase the refcount to mark the granule as in-use. refcount
+                 * is incremented by S2TTES_PER_S2TT (ref RTT unfolding).
+                 */
+                __granule_refcount_inc(g_tbl, S2TTES_PER_S2TT);
+
+        } else if (s2tte_is_valid_ns(parent_s2tte, level - 1L)) {
+                unsigned long block_pa;
+
+                /*
+                 * We should observe parent valid_ns s2tte only when
+                 * we create tables above this level.
+                 */
+                assert(level > RTT_MIN_BLOCK_LEVEL);
+
+                /*
+                 * Break before make. This may cause spurious S2 aborts.
+                 */
+                s2tte_write(&parent_s2tt[wi.index], 0UL);
+                invalidate_block(&s2_ctx, map_addr);
+
+                block_pa = s2tte_pa(parent_s2tte, level - 1L);
+
+                s2tt_init_valid_ns(s2tt, block_pa, level);
+
+                /*
+                 * Increase the refcount to mark the granule as in-use. refcount
+                 * is incremented by S2TTES_PER_S2TT (ref RTT unfolding).
+                 */
+                __granule_refcount_inc(g_tbl, S2TTES_PER_S2TT);
+
+        } else if (s2tte_is_table(parent_s2tte, level - 1L)) {
+                ret = pack_return_code(RMI_ERROR_RTT,
+                                        (unsigned int)(level - 1L));
+                goto out_unmap_table;
+
+        } else {
+                assert(false);
+        }
+```
+Based on the parent RTT page type, it updates the new RTT page! Because the 
+RTT page that needs to be inserted in the stage2 page table is also the array 
+of RTT or last entries based on the page table level, all of its entries should 
+be initialized following the HIPAS and RIPAS of the parent RTT. When the RTT is 
+first generated during the REALM creation, the RIPAS of the root RTT entries 
+should be zero, which means the UNASSIGNED. Before the other RMI call such as
+RMI_RTT_INIT_RIPAS is called, there is no way to change the HIPAS from 
+unassigned to assigned. The HIPAS can be changed through the RMI_DATA_CREATE 
+or RMI_DATA_DESTROY. 
+
+
+```cpp
+        ret = RMI_SUCCESS;
+
+        granule_set_state(g_tbl, GRANULE_STATE_RTT);
+
+        parent_s2tte = s2tte_create_table(rtt_addr, level - 1L);
+        s2tte_write(&parent_s2tt[wi.index], parent_s2tte);
+
+```
+
+After the update, it first updates the granule of the new RTT page to 
+GRANULE_STATE_RTT because it will be used as RTT page! Also, it sets up flag 
+on the rtt_addr which is the physical address of the RTT to indicate that this 
+page is used as s2tte table in which level, not entry. Finally it updates the 
+parent_s2tt so that the next level RTT connection can be established. 
+
+
+
+## SMC_RMM_REALM_ACTIVATE
 
 ## SMC_RMM_REC_CREATE
-RMM should be able to access normal world memory to copy the nw provided data 
-structures or pass the information to the host. To this end, RMM defines two 
-apis ns_buffer_read and ns_buffer_write function to provide read or write access
-for the RMM layer to the NW memory. Internally both functions invokes the 
-ns_granule_map function to map the NS page. 
-
-
 ```cpp
 unsigned long smc_rec_create(unsigned long rec_addr,
                              unsigned long rd_addr,
@@ -937,24 +1304,116 @@ unsigned long smc_rec_create(unsigned long rec_addr,
         ns_access_ok = ns_buffer_read(SLOT_NS, g_rec_params, 0U,
                                       sizeof(rec_params), &rec_params);
 ```
-For example, smc_rec_create handler for SMC_RMM_REC_CREATE RMI call invoked from 
-the host should be able to read the rec parameter provided by the host located
-in the NS memory. Note that the page containing the rec_params is not delegated
-to the RMM, so it belongs to NS_PAS. Therefore, to securely read the params 
-it should be copied from the NS to REALM_PAS memory. To this end, the mapping is 
-generated and the data can be safely copied from the NS memory to RMM internal 
-memory buffer, rec_params. 
+In the above code, it should be able to read the rec parameter provided by the 
+host located in the NS memory. Note that the page containing the rec_params is 
+**not delegated**to the RMM, so it belongs to NS_PAS. Therefore, to securely 
+read the params, it should be copied from the NS to REALM_PAS memory. To this 
+end, the mapping is generated, and the data can be safely copied from the NS 
+memory to RMM internal memory buffer, rec_params. In detail, although the 
+rec_addr is not delegated, RMM can retrieve the granule associated with the 
+rec_addr. With this granule information of the rec_params, RMM can map the NS
+memory to the RMM and read the content.
 
-To be able to access REC memory, host should have invoked the delegate RMI call 
-to delegate the page containing the REC. Unless, RMM rejects SMC_RMM_REC_CREATE
-call because it has not been delegated, which is turned out as a result of 
-invoking the find_lock_two_granules function. 
+```cpp
+bool ns_buffer_read(enum buffer_slot slot,
+                    struct granule *ns_gr,
+                    unsigned int offset,
+                    unsigned int size,
+                    void *dest)
+{
+        uintptr_t src;
+        bool retval;
+
+        assert(is_ns_slot(slot));
+        assert(ns_gr != NULL);
+        assert(dest != NULL);
+
+        /*
+         * To simplify the trapping mechanism around NS access,
+         * memcpy_ns_read uses a single 8-byte LDR instruction and
+         * all parameters must be aligned accordingly.
+         */
+        assert(ALIGNED(size, 8));
+        assert(ALIGNED(offset, 8));
+        assert(ALIGNED(dest, 8));
+
+        offset &= ~GRANULE_MASK;
+        assert(offset + size <= GRANULE_SIZE);
+
+        src = (uintptr_t)ns_granule_map(slot, ns_gr);
+        retval = memcpy_ns_read(dest, (void *)(src + offset), size);
+        ns_buffer_unmap((void *)src);
+
+        return retval;
+}
+```
+
+RMM should be able to access normal world memory to copy the nw provided data 
+structures or pass the information to the host. To this end, RMM defines two 
+APIs ns_buffer_read and ns_buffer_write function to provide read or write access
+for the RMM layer to the NW memory. Internally both functions invoke the 
+**ns_granule_map** function to map the NS page. 
+
+```cpp
+        /* Loop through rec_aux_granules and transit them */
+        for (unsigned int i = 0U; i < num_rec_aux; i++) {
+                struct granule *g_rec_aux = find_lock_granule(
+                                                rec_params.aux[i],
+                                                GRANULE_STATE_DELEGATED);
+                if (g_rec_aux == NULL) {
+                        free_rec_aux_granules(rec_aux_granules, i, false);
+                        return RMI_ERROR_INPUT;
+                }
+                granule_unlock_transition(g_rec_aux, GRANULE_STATE_REC_AUX);
+                rec_aux_granules[i] = g_rec_aux;
+        }
+
+        if (!find_lock_two_granules(rec_addr,
+                                GRANULE_STATE_DELEGATED,
+                                &g_rec,
+                                rd_addr,
+                                GRANULE_STATE_RD,
+                                &g_rd)) {
+                ret = RMI_ERROR_INPUT;
+                goto out_free_aux;
+        }
+	                
+        rec = granule_map(g_rec, SLOT_REC);
+        rd = granule_map(g_rd, SLOT_RD);
+```
+
+To set up the REC of the realm VM, the rec page should have been delegated. To
+access REC (rec_addr). Unless, RMM rejects this RMI call because REC has not 
+been delegated, which is turned out as a result of invoking the 
+find_lock_two_granules function. After locking the granule, it maps the REC 
+page to fixed virtual address prepared for SLOT_REC by invoking granule_map.
+
+```cpp
+        atomic_granule_get(g_rd);
+        new_rec_state = GRANULE_STATE_REC;
+        rec->runnable = rec_params.flags & REC_PARAMS_FLAG_RUNNABLE;
+
+        rec->alloc_info.ctx_initialised = false;
+        /* Initialize attestation state */
+        rec->token_sign_ctx.state = ATTEST_SIGN_NOT_STARTED;
+
+        set_rd_rec_count(rd, rec_idx + 1U);
+
+        ret = RMI_SUCCESS;
+
+out_unmap:
+        buffer_unmap(rd);
+        buffer_unmap(rec);
+
+        granule_unlock(g_rd);
+        granule_unlock_transition(g_rec, new_rec_state);
+```
 
 Anyway, if the page has been delegated, which means the REC page is not actually
 belong to the NS PAS, then it can be mapped and accessible inside the RMM layer
 directly without copies. All pages delegated to the RMM have same state 
 GRANULE_STATE_DELEGATED. After initializing rec structure, it converts state of 
-the rec page to GRANULE_STATE_REC by invoking granule_unlock_transition. 
+the rec page to **GRANULE_STATE_REC** by invoking granule_unlock_transition. 
 
 ### Init virtualization related registers
 ```cpp
@@ -1021,7 +1480,6 @@ will be used when the PE enters the target VM.
 
 ### Purpose of aux pages attached to rec? (rec->g_aux)
 refer to [[]]
-
 
 
 ## SMC_RMM_REC_ENTER
