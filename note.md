@@ -1304,7 +1304,7 @@ of the IOMMU sub system is generating the IOVA that can be accessible from the
 device and host processor simultaneously. After the IOVA generation, it should 
 be mapped to the physical addresses through manipulating the page table managed 
 by the IOMMU. Therefore, when the dma_alloc_XX series of functions are invoked 
-in the kernel, it will first invoke the iommu_dma_alloc function. 
+in the kernel, it will first invoke the **iommu_dma_alloc** function. 
 
 
 ```cpp
@@ -1376,8 +1376,8 @@ static const struct dma_map_ops iommu_dma_ops = {
         .opt_mapping_size       = iommu_dma_opt_mapping_size,
 };
 ```
-The ops->map_page function will invoke ommu_dma_alloc function if the dev is 
-connected to the iommu subsystem.
+The ops->alloc will invoke iommu_dma_alloc function if the dev is connected to 
+the iommu subsystem.
 
 ```cpp
 static void *iommu_dma_alloc(struct device *dev, size_t size,
@@ -1415,7 +1415,13 @@ static void *iommu_dma_alloc(struct device *dev, size_t size,
         return cpu_addr;
 }
 ```
-### IOVA allocation
+
+DMA allocation consists of two parts: reserving memory pages to be used as DMA
+pages between the CPU and SMMU device and generating mapping in the IOMMU table.
+The first part is done for the CPU parts and the other part is to allow devices
+to access the shared memory region. 
+
+### Reserve DMA memory and retrieve IOVA
 ```cpp
 static void *iommu_dma_alloc_pages(struct device *dev, size_t size,
                 struct page **pagep, gfp_t gfp, unsigned long attrs)
@@ -1455,7 +1461,6 @@ out_free_pages:
 }
 ```
 
-### Generating IOVA->PA mapping
 ```cpp
 static dma_addr_t __iommu_dma_map(struct device *dev, phys_addr_t phys,
                 size_t size, int prot, u64 dma_mask)
@@ -1484,6 +1489,196 @@ static dma_addr_t __iommu_dma_map(struct device *dev, phys_addr_t phys,
 }
 ```
 
+```cpp
+static dma_addr_t iommu_dma_alloc_iova(struct iommu_domain *domain,
+                size_t size, u64 dma_limit, struct device *dev)
+{
+        struct iommu_dma_cookie *cookie = domain->iova_cookie;
+        struct iova_domain *iovad = &cookie->iovad;
+        unsigned long shift, iova_len, iova = 0;
+
+        if (cookie->type == IOMMU_DMA_MSI_COOKIE) {
+                cookie->msi_iova += size;
+                return cookie->msi_iova - size;
+        }
+
+        shift = iova_shift(iovad);
+        iova_len = size >> shift;
+
+        dma_limit = min_not_zero(dma_limit, dev->bus_dma_limit);
+
+        if (domain->geometry.force_aperture)
+                dma_limit = min(dma_limit, (u64)domain->geometry.aperture_end);
+
+        /* Try to get PCI devices a SAC address */
+        if (dma_limit > DMA_BIT_MASK(32) && !iommu_dma_forcedac && dev_is_pci(dev))
+                iova = alloc_iova_fast(iovad, iova_len,
+                                       DMA_BIT_MASK(32) >> shift, false);
+
+        if (!iova)
+                iova = alloc_iova_fast(iovad, iova_len, dma_limit >> shift,
+                                       true);
+
+        return (dma_addr_t)iova << shift;
+}
+```
+
+```cpp
+unsigned long
+alloc_iova_fast(struct iova_domain *iovad, unsigned long size,
+                unsigned long limit_pfn, bool flush_rcache)
+{
+        unsigned long iova_pfn;
+        struct iova *new_iova;
+                
+        /*
+         * Freeing non-power-of-two-sized allocations back into the IOVA caches
+         * will come back to bite us badly, so we have to waste a bit of space
+         * rounding up anything cacheable to make sure that can't happen. The
+         * order of the unadjusted size will still match upon freeing.
+         */     
+        if (size < (1 << (IOVA_RANGE_CACHE_MAX_SIZE - 1)))
+                size = roundup_pow_of_two(size);
+
+        iova_pfn = iova_rcache_get(iovad, size, limit_pfn + 1);
+        if (iova_pfn)
+                return iova_pfn;
+        
+retry:  
+        new_iova = alloc_iova(iovad, size, limit_pfn, true);
+        if (!new_iova) {
+                unsigned int cpu;
+                
+                if (!flush_rcache)
+                        return 0;
+                
+                /* Try replenishing IOVAs by flushing rcache. */
+                flush_rcache = false;
+                for_each_online_cpu(cpu)
+                        free_cpu_cached_iovas(cpu, iovad);
+                free_global_cached_iovas(iovad);
+                goto retry;
+        }       
+        
+        return new_iova->pfn_lo;
+}       
+EXPORT_SYMBOL_GPL(alloc_iova_fast);
+```
+
+
+```cpp
+/**
+ * alloc_iova - allocates an iova
+ * @iovad: - iova domain in question
+ * @size: - size of page frames to allocate
+ * @limit_pfn: - max limit address
+ * @size_aligned: - set if size_aligned address range is required
+ * This function allocates an iova in the range iovad->start_pfn to limit_pfn,
+ * searching top-down from limit_pfn to iovad->start_pfn. If the size_aligned
+ * flag is set then the allocated address iova->pfn_lo will be naturally
+ * aligned on roundup_power_of_two(size).
+ */
+struct iova *
+alloc_iova(struct iova_domain *iovad, unsigned long size,
+        unsigned long limit_pfn,
+        bool size_aligned)
+{
+        struct iova *new_iova;
+        int ret;
+
+        new_iova = alloc_iova_mem();
+        if (!new_iova)
+                return NULL;
+
+        ret = __alloc_and_insert_iova_range(iovad, size, limit_pfn + 1,
+                        new_iova, size_aligned);
+
+        if (ret) {
+                free_iova_mem(new_iova);
+                return NULL;
+        }
+
+        return new_iova;
+}
+EXPORT_SYMBOL_GPL(alloc_iova);
+```
+
+```cpp
+static struct iova *alloc_iova_mem(void)
+{
+        return kmem_cache_zalloc(iova_cache, GFP_ATOMIC | __GFP_NOWARN);
+}
+```
+Note that the iova memory is just another kernel memory 
+
+
+```cpp
+static int __alloc_and_insert_iova_range(struct iova_domain *iovad,
+                unsigned long size, unsigned long limit_pfn,
+                        struct iova *new, bool size_aligned)
+{
+        struct rb_node *curr, *prev;
+        struct iova *curr_iova;
+        unsigned long flags;
+        unsigned long new_pfn, retry_pfn;
+        unsigned long align_mask = ~0UL;
+        unsigned long high_pfn = limit_pfn, low_pfn = iovad->start_pfn;
+
+        if (size_aligned)
+                align_mask <<= fls_long(size - 1);
+
+        /* Walk the tree backwards */
+        spin_lock_irqsave(&iovad->iova_rbtree_lock, flags);
+        if (limit_pfn <= iovad->dma_32bit_pfn &&
+                        size >= iovad->max32_alloc_size)
+                goto iova32_full;
+
+        curr = __get_cached_rbnode(iovad, limit_pfn);
+        curr_iova = to_iova(curr);
+        retry_pfn = curr_iova->pfn_hi + 1;
+
+retry:
+        do {
+                high_pfn = min(high_pfn, curr_iova->pfn_lo);
+                new_pfn = (high_pfn - size) & align_mask;
+                prev = curr;
+                curr = rb_prev(curr);
+                curr_iova = to_iova(curr);
+        } while (curr && new_pfn <= curr_iova->pfn_hi && new_pfn >= low_pfn);
+
+        if (high_pfn < size || new_pfn < low_pfn) {
+                if (low_pfn == iovad->start_pfn && retry_pfn < limit_pfn) {
+                        high_pfn = limit_pfn;
+                        low_pfn = retry_pfn;
+                        curr = iova_find_limit(iovad, limit_pfn);
+                        curr_iova = to_iova(curr);
+                        goto retry;
+                }
+                iovad->max32_alloc_size = size;
+                goto iova32_full;
+        }
+
+        /* pfn_lo will point to size aligned address if size_aligned is set */
+        new->pfn_lo = new_pfn;
+        new->pfn_hi = new->pfn_lo + size - 1;
+
+        /* If we have 'prev', it's a valid place to start the insertion. */
+        iova_insert_rbtree(&iovad->rbroot, new, prev);
+        __cached_rbnode_insert_update(iovad, new);
+
+        spin_unlock_irqrestore(&iovad->iova_rbtree_lock, flags);
+        return 0;
+
+iova32_full:
+        spin_unlock_irqrestore(&iovad->iova_rbtree_lock, flags);
+        return -ENOMEM;
+}
+
+
+```
+
+
+### Generating IOVA->PA mapping
 ```cpp
 int iommu_map_atomic(struct iommu_domain *domain, unsigned long iova,
               phys_addr_t paddr, size_t size, int prot)

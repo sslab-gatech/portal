@@ -102,6 +102,58 @@ bool s2tte_is_assigned(unsigned long s2tte, long level)
 Also, bits [2,6) are used to encode the HIPAS of the page using the S2TTE. 
 
 
+### Protected IPA and UNPROTECTED IPA
+```cpp
+#define S2TTE_MEMATTR_FWB_NORMAL_WB     ((1UL << 4) | (2UL << 2))
+#define S2TTE_AF                        (1UL << 10)
+#define S2TTE_XN                        (2UL << 53)
+#define S2TTE_NS                        (1UL << 55)
+```
+
+Note that all other fields except S2TTE_NS bit (which is 55th bit) of the s2tte 
+does not exist in the spec. This bit doesn't affect the hardware interpretation. 
+This bit is utilized to distinguish UNPROTECTED pages which are not delegated to
+the Realm from the PROTECTED pages. 
+
+
+
+```cpp
+static bool s2tte_check(unsigned long s2tte, long level, unsigned long ns)
+{
+        unsigned long desc_type;
+
+        if ((s2tte & S2TTE_NS) != ns) {
+                return false;
+        }
+
+        desc_type = s2tte & DESC_TYPE_MASK;
+
+        /* Only pages at L3 and valid blocks at L2 allowed */
+        if (((level == RTT_PAGE_LEVEL) && (desc_type == S2TTE_L3_PAGE)) ||
+            ((level == RTT_MIN_BLOCK_LEVEL) && (desc_type == S2TTE_L012_BLOCK))) {
+                return true;
+        }
+
+        return false;
+}
+
+/*
+ * Returns true if @s2tte is a page or block s2tte, and NS=0.
+ */
+bool s2tte_is_valid(unsigned long s2tte, long level)
+{
+        return s2tte_check(s2tte, level, 0UL);
+}
+
+/*
+ * Returns true if @s2tte is a page or block s2tte, and NS=1.
+ */
+bool s2tte_is_valid_ns(unsigned long s2tte, long level)
+{
+        return s2tte_check(s2tte, level, S2TTE_NS);
+}
+```
+
 ## Map Realm IPA
 ### Set-up RIPAS 
 After relocating the page to the realm, its RIPAS should be set to be used as 
@@ -309,12 +361,11 @@ unsigned long s2tte_create_valid(unsigned long pa, long level)
 In contrast with the previous case, if the smc_rtt_init_ripas has been called 
 for the selected S2TTE before, by changing the HIPAS from UNASSIGNED to ASSIGNED
 the addresses mapped through this S2TTE can be valid and safe to be used inside
-the REALM.  
+the REALM. 
 
 ```cpp
 #define S2TTE_ATTRS     (S2TTE_MEMATTR_FWB_NORMAL_WB | S2TTE_AP_RW | \
                         S2TTE_SH_IS | S2TTE_AF)
-
 #define S2TTE_BLOCK     (S2TTE_ATTRS | S2TTE_L012_BLOCK)
 #define S2TTE_PAGE      (S2TTE_ATTRS | S2TTE_L3_PAGE)
 ```
@@ -327,6 +378,31 @@ Non-secure pages are mapped through the stage 2 page table secured by the RMM.
 However, instead of building entire page entry mapped to the NS memory from the 
 scratch, host passes the generated page to the RMM and RMM checks and sets the 
 required field for security and convenience. 
+
+
+```cpp
+unsigned long smc_rtt_map_unprotected(unsigned long rd_addr,
+                                      unsigned long map_addr,
+                                      unsigned long ulevel,
+                                      unsigned long s2tte)
+{
+        long level = (long)ulevel;
+
+        if (!host_ns_s2tte_is_valid(s2tte, level)) {
+                return RMI_ERROR_INPUT;
+        }
+
+        return map_unmap_ns(rd_addr, map_addr, level, s2tte, MAP_NS);
+}
+
+unsigned long smc_rtt_unmap_unprotected(unsigned long rd_addr,
+                                        unsigned long map_addr,
+                                        unsigned long ulevel)
+{
+        return map_unmap_ns(rd_addr, map_addr, (long)ulevel, 0UL, UNMAP_NS);
+}
+```
+
 ```cpp
 /*
  * Validate the portion of NS S2TTE that is provided by the host.
@@ -366,7 +442,6 @@ bool host_ns_s2tte_is_valid(unsigned long s2tte, long level)
          */
         return true;
 }
-
 ```
 
 ```cpp
@@ -381,6 +456,38 @@ static unsigned long map_unmap_ns(unsigned long rd_addr,
                                   long level,
                                   unsigned long host_s2tte,
                                   enum map_unmap_ns_op op)
+        if (op == MAP_NS) {
+                if (!s2tte_is_unassigned(s2tte)) {
+                        ret = pack_return_code(RMI_ERROR_RTT,
+                                                (unsigned int)level);
+                        goto out_unmap_table;
+                }
+
+                s2tte = s2tte_create_valid_ns(host_s2tte, level);
+                s2tte_write(&s2tt[wi.index], s2tte);
+                __granule_get(wi.g_llt);
+
+        } else if (op == UNMAP_NS) {
+                /*
+                 * The following check also verifies that map_addr is outside
+                 * PAR, as valid_NS s2tte may only cover outside PAR IPA range.
+                 */
+                if (!s2tte_is_valid_ns(s2tte, level)) {
+                        ret = pack_return_code(RMI_ERROR_RTT,
+                                                (unsigned int)level);
+                        goto out_unmap_table;
+                }
+
+                s2tte = s2tte_create_invalid_ns();
+                s2tte_write(&s2tt[wi.index], s2tte);
+                __granule_put(wi.g_llt);
+                if (level == RTT_PAGE_LEVEL) {
+                        invalidate_page(&s2_ctx, map_addr);
+                } else {
+                        invalidate_block(&s2_ctx, map_addr);
+                }
+        }
+
 
 ```
 
@@ -422,3 +529,17 @@ times until the RIPAS can be successfully changed.
 
 set_memory_encrypted is the RSI call invoked from the realm kernel. It sets the specific memory area from EMPTY RIPAS to 
 MEMORY RIPAS. 
+
+
+
+There is no PORTAL pas but we need to filter the PORTAL Region in the RMM.
+
+ALL portal region should be filtered by the bloom filter. so we utilize HIPAS RIPAS for the memory 
+The thing is actually PORTAL region is set as NW PAS and REALM_PAS in the R-GPT and NR-GPT respectively,
+but we maintain those regions are portal pas. and check the PMI PSI to filter those addresses 
+
+PORTAL_ASSIGNED -> Delegated and utilized as memory pages for SMMU -> these addresses should be bloom filtered! 
+PORTAL_EMPTY -> Delegated as PORTAL but not utilized by any entities yet -> RMM should check SW pas for PMI PSI. 
+//when kernel utilize this function?
+
+
