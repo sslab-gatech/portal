@@ -137,7 +137,7 @@ static void arm_bl2_plat_gpt_setup(void)
 	 */
 	pas_region_t pas_regions[] = {
 #if ENABLE_PORTAL
-		ARM_PAS_SMMU, //building GPT l1 table entries for smmu
+		ARM_PAS_SMMU, // Set-up GPT for smmu mmio mapped regions !
 #endif 
 		ARM_PAS_KERNEL,
 		ARM_PAS_SECURE,

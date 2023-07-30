@@ -600,6 +600,7 @@ int plat_rmmd_load_manifest(struct rmm_manifest *manifest)
 		bank_ptr[i].base = base;
 		bank_ptr[i].size = size;
 
+		INFO("bank[%ld]: base:%lx - end:%lx\n", i, base, base+size);
 		/* Update checksum */
 		checksum += base + size;
 	}

@@ -392,7 +392,7 @@ void __init arm_bl31_plat_arch_setup(void)
 #endif
 
 #if ENABLE_PORTAL
-		ARM_MAP_PORTAL_REGION,
+		ARM_MAP_PORTAL_REGION, //map smmu mmio region in el3 xlate-tbl 
 #endif 
 
 #if RECLAIM_INIT_CODE
