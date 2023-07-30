@@ -220,7 +220,11 @@ void *dma_direct_alloc(struct device *dev, size_t size,
 	    !force_dma_unencrypted(dev) && !is_swiotlb_for_alloc(dev))
 		return dma_direct_alloc_no_mapping(dev, size, dma_handle, gfp);
 
+	if (force_dma_unencrypted(dev))
+		printk("this is realm world !!\n\n");
+
 	if (!dev_is_dma_coherent(dev)) {
+		printk("dev is not dma coherent \n\n");
 		/*
 		 * Fallback to the arch handler if it exists.  This should
 		 * eventually go away.
@@ -261,10 +265,13 @@ void *dma_direct_alloc(struct device *dev, size_t size,
 	 * Decrypting memory may block, so allocate the memory from the atomic
 	 * pools if we can't block.
 	 */
-	if (force_dma_unencrypted(dev) && dma_direct_use_pool(dev, gfp))
+	if (force_dma_unencrypted(dev) && dma_direct_use_pool(dev, gfp)) {
+		printk("force dma unecrypted && dma_direct use pool \n\n");
 		return dma_direct_alloc_from_pool(dev, size, dma_handle, gfp);
+	}
 
 	/* we always manually zero the memory once we are done */
+	printk("dma_direct_alloc_pages!!!\n\n");
 	page = __dma_direct_alloc_pages(dev, size, gfp & ~__GFP_ZERO, true);
 	if (!page)
 		return NULL;

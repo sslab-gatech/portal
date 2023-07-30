@@ -1445,6 +1445,7 @@ static void *iommu_dma_alloc(struct device *dev, size_t size,
 	void *cpu_addr;
 
 	gfp |= __GFP_ZERO;
+	printk("DMA_ALLOC\n\n\n\n\n\n\n\n\n"); //for debugging dma alloc..
 
 	if (gfpflags_allow_blocking(gfp) &&
 	    !(attrs & DMA_ATTR_FORCE_CONTIGUOUS)) {

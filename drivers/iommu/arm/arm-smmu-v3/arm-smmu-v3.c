@@ -2266,6 +2266,7 @@ static void arm_smmu_install_ste_for_dev(struct arm_smmu_master *master)
 	int i, j;
 	struct arm_smmu_device *smmu = master->smmu;
 
+	printk("install ste for dev! num_streams:%d\n", master->num_streams);
 	for (i = 0; i < master->num_streams; ++i) {
 		u32 sid = master->streams[i].id;
 		__le64 *step = arm_smmu_get_step_for_sid(smmu, sid);
@@ -2386,9 +2387,10 @@ static void arm_smmu_detach_dev(struct arm_smmu_master *master)
 	unsigned long flags;
 	struct arm_smmu_domain *smmu_domain = master->domain;
 
-	if (!smmu_domain)
+	if (!smmu_domain) {
+		printk("No smmu domain, doesn't need to detach devs\n");
 		return;
-
+	}
 	arm_smmu_disable_ats(master);
 
 	spin_lock_irqsave(&smmu_domain->devices_lock, flags);
@@ -2415,6 +2417,7 @@ static int arm_smmu_attach_dev(struct iommu_domain *domain, struct device *dev)
 	master = dev_iommu_priv_get(dev);
 	smmu = master->smmu;
 
+	dev_info(dev, "attaching new device!\n");
 	/*
 	 * Checking that SVA is disabled ensures that this device isn't bound to
 	 * any mm, and can be safely detached from its old domain. Bonds cannot
@@ -2425,6 +2428,8 @@ static int arm_smmu_attach_dev(struct iommu_domain *domain, struct device *dev)
 		return -EBUSY;
 	}
 
+	//detach devices of the domain only when the dev needs to be attached to 
+	//existing domain
 	arm_smmu_detach_dev(master);
 
 	mutex_lock(&smmu_domain->init_mutex);
@@ -2576,6 +2581,7 @@ static int arm_smmu_insert_master(struct arm_smmu_device *smmu,
 	mutex_lock(&smmu->streams_mutex);
 	for (i = 0; i < fwspec->num_ids; i++) {
 		u32 sid = fwspec->ids[i];
+		dev_info(master->dev, "sid of the device:%d\n", sid);
 
 		new_stream = &master->streams[i];
 		new_stream->id = sid;
@@ -3947,7 +3953,7 @@ static phys_addr_t xlate_virt_to_phys(unsigned long virtual_address)
 	physical_address = (pte_pfn(*pte) << PAGE_SHIFT) | (virtual_address & ~PAGE_MASK);
 
 out:
-	printk("%s: VirtAddr(%lx) -> PhyAddr(%llx)\n", __func__, virtual_address, physical_address);
+	//printk("%s: VirtAddr(%lx) -> PhyAddr(%llx)\n", __func__, virtual_address, physical_address);
 	return physical_address;
 }
 
