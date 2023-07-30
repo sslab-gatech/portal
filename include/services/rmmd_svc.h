@@ -227,7 +227,13 @@ uint64_t rmmd_rmm_el3_handler(uint32_t smc_fid,
 
 #define PMI_READ_SMMU_REG		SMC64_PMI_FID(U(0))
 #define PMI_WRITE_SMMU_REG		SMC64_PMI_FID(U(1))
-
+//TODO 
+//PMI_SUBMIT_PORTAL_CMDQ
+//PMI_BUILD_ST_LVL2 (Build stream table 2 level, requires two array pages for L1 and L2)
+//PMI_UPDATE_ST
+//PMI_UPDATE_STE (sid and STE entry -> just write into the L2 table entry)
+//PMI BUILD_CD (
+//PMI_UPDATE_CD (check the asid (bloom filter))
 
 enum regSize {
 	REG_32BIT,
