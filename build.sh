@@ -4,6 +4,7 @@ rm -rf tf-rmm/build
 rm -rf tf-a/build 
 rm ./QEMU_EFI.fd
 rm -rf edk2_build/Build
+rm -rf out/
 
 ROOT=$PWD
 
@@ -28,23 +29,23 @@ cd ../
 #make -C tf-a-tests -j 40 CROSS_COMPILE=aarch64-none-elf- PLAT=qemu DEBUG=1 LOG_LEVEL=50 TESTS=realm-payload pack_realm 
 
 ## build edk2
-cd ./edk2_build
-./build.sh
+cd ./edk2
+./edk2_build.sh
 cd ../
 
-# Build buildroot
-cd buildroot
-make qemu_aarch64_virt_defconfig
-utils/config -e BR2_TARGET_ROOTFS_CPIO
-utils/config -e BR2_TARGET_ROOTFS_CPIO_GZIP
-make olddefconfig
-make
-cp ./output/images/rootfs.cpio.gz  ../
-cd ../
+## Build buildroot
+#cd buildroot
+#make qemu_aarch64_virt_defconfig
+#utils/config -e BR2_TARGET_ROOTFS_CPIO
+#utils/config -e BR2_TARGET_ROOTFS_CPIO_GZIP
+#make olddefconfig
+#make
+#cp ./output/images/rootfs.cpio.gz  ../
+#cd ../
 
 
 # Build TF-A for linux
-export PATH=/home/jaehyuk/cross/gcc-arm-10.3-2021.07-x86_64-aarch64-none-elf/bin:$PATH
+export PATH=$ROOT/toolchain/gcc-arm-10.3-2021.07-x86_64-aarch64-none-elf/bin:$PATH
 make -C tf-a -j 40 CROSS_COMPILE=aarch64-none-elf- ARCH=aarch64 PLAT=qemu ENABLE_RME=1 ENABLE_PORTAL=1 DEBUG=1 \
 ARM_LINUX_KERNEL_AS_BL33=1 RMM=../tf-rmm/build/Debug/rmm.img all BL33=../QEMU_EFI.fd all fip
 
