@@ -335,7 +335,7 @@ static int __iommu_probe_device(struct device *dev, struct list_head *group_list
 		goto out_module_put;
 	}
 
-	printk("iommu dev found!!!\n\n");
+	printk("iommu dev found!!!============================");
 	dev->iommu->iommu_dev = iommu_dev;
 	dev->iommu->max_pasids = dev_iommu_get_max_pasids(dev);
 

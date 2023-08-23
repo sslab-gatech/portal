@@ -1226,6 +1226,7 @@ static int iort_iommu_xlate(struct device *dev, struct acpi_iort_node *node,
 	const struct iommu_ops *ops;
 	struct fwnode_handle *iort_fwnode;
 
+	dev_info(dev, "%s\n", __func__);
 	if (!node)
 		return -ENODEV;
 
@@ -1260,6 +1261,7 @@ static int iort_pci_iommu_init(struct pci_dev *pdev, u16 alias, void *data)
 	struct acpi_iort_node *parent;
 	u32 streamid;
 
+	dev_info(info->dev, "%s\n", __func__);
 	parent = iort_node_map_id(info->node, alias, &streamid,
 				  IORT_IOMMU_TYPE);
 	return iort_iommu_xlate(info->dev, parent, streamid);
@@ -1329,7 +1331,7 @@ int iort_iommu_configure_id(struct device *dev, const u32 *id_in)
 	struct acpi_iort_node *node;
 	int err = -ENODEV;
 
-	printk("iort_iommu_configure_id\n");
+	//printk("iort_iommu_configure_id\n");
 
 	if (dev_is_pci(dev)) {
 		struct iommu_fwspec *fwspec;

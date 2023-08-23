@@ -271,7 +271,7 @@ void *dma_direct_alloc(struct device *dev, size_t size,
 	}
 
 	/* we always manually zero the memory once we are done */
-	printk("dma_direct_alloc_pages!!!\n\n");
+	//printk("dma_direct_alloc_pages!!!\n\n");
 	page = __dma_direct_alloc_pages(dev, size, gfp & ~__GFP_ZERO, true);
 	if (!page)
 		return NULL;

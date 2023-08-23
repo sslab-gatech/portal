@@ -806,7 +806,7 @@ static inline void arm_smmu_sva_remove_dev_pasid(struct iommu_domain *domain,
 static phys_addr_t xlate_virt_to_phys(unsigned long virtual_address);
 
 
-#define ENABLE_PORTAL 1
+#define ENABLE_PORTAL 0
 
 static inline u32 readl_portal_relaxed(const volatile void __iomem *addr)
 {
