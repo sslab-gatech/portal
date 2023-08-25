@@ -1098,14 +1098,17 @@ static int config_realm_hash_algo(struct realm *realm,
 {
 	switch (cfg->hash_algo) {
 	case KVM_CAP_ARM_RME_MEASUREMENT_ALGO_SHA256:
-		if (!rme_supports(RMI_FEATURE_REGISTER_0_HASH_SHA_256))
+		if (!rme_supports(RMI_FEATURE_REGISTER_0_HASH_SHA_256)) {
+			printk("RME does not support SHA_256 for hash\n");
 			return -EINVAL;
+		}
 		break;
 	case KVM_CAP_ARM_RME_MEASUREMENT_ALGO_SHA512:
 		if (!rme_supports(RMI_FEATURE_REGISTER_0_HASH_SHA_512))
 			return -EINVAL;
 		break;
 	default:
+		printk("Weird hash algorithm has been passed from the guest\n");
 		return -EINVAL;
 	}
 	realm->params->measurement_algo = cfg->hash_algo;
@@ -1141,6 +1144,7 @@ static int kvm_rme_config_realm(struct kvm *kvm, struct kvm_enable_cap *cap)
 	struct realm *realm = &kvm->arch.realm;
 	int r = 0;
 
+	printk("KVM_CAP_ARM_RME_CONFIG_REALM: args[1]:%llx\n", cap->args[1]);
 	if (kvm_realm_state(kvm) != REALM_STATE_NONE)
 		return -EBUSY;
 
