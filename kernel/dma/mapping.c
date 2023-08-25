@@ -112,12 +112,16 @@ EXPORT_SYMBOL(dmam_alloc_attrs);
 static bool dma_go_direct(struct device *dev, dma_addr_t mask,
 		const struct dma_map_ops *ops)
 {
-	if (likely(!ops))
+	if (likely(!ops)) {
+		dev_info(dev, "no ops for this dev!\n");
 		return true;
+	}
 #ifdef CONFIG_DMA_OPS_BYPASS
-	if (dev->dma_ops_bypass)
+	if (dev->dma_ops_bypass) {
+		dev_info(dev, "iommu bypass is set for this dev\n");
 		return min_not_zero(mask, dev->bus_dma_limit) >=
 			    dma_direct_get_required_mask(dev);
+	}
 #endif
 	return false;
 }
@@ -511,9 +515,9 @@ void *dma_alloc_attrs(struct device *dev, size_t size, dma_addr_t *dma_handle,
 	/* let the implementation decide on the zone to allocate from: */
 	flag &= ~(__GFP_DMA | __GFP_DMA32 | __GFP_HIGHMEM);
 
-	if (dma_alloc_direct(dev, ops))  //most of the time this function is invoked 
+	if (dma_alloc_direct(dev, ops))
 		cpu_addr = dma_direct_alloc(dev, size, dma_handle, flag, attrs);
-	else if (ops->alloc)
+	else if (ops->alloc) 
 		cpu_addr = ops->alloc(dev, size, dma_handle, flag, attrs);
 	else
 		return NULL;

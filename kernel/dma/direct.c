@@ -155,6 +155,8 @@ again:
 			goto again;
 		}
 	}
+	dev_info(dev, "%s, allow_highmem:%d allocated page:%lx\n",
+		       	__func__, allow_highmem, page_address(page));
 
 	return page;
 }
@@ -184,6 +186,7 @@ static void *dma_direct_alloc_from_pool(struct device *dev, size_t size,
 	if (!page)
 		return NULL;
 	*dma_handle = phys_to_dma_direct(dev, page_to_phys(page));
+	dev_info(dev, "%s, allocated page %lx\n", __func__, *dma_handle);
 	return ret;
 }
 
@@ -192,6 +195,7 @@ static void *dma_direct_alloc_no_mapping(struct device *dev, size_t size,
 {
 	struct page *page;
 
+	dev_info(dev, "%s\n", __func__);
 	page = __dma_direct_alloc_pages(dev, size, gfp & ~__GFP_ZERO, true);
 	if (!page)
 		return NULL;
@@ -219,9 +223,6 @@ void *dma_direct_alloc(struct device *dev, size_t size,
 	if ((attrs & DMA_ATTR_NO_KERNEL_MAPPING) &&
 	    !force_dma_unencrypted(dev) && !is_swiotlb_for_alloc(dev))
 		return dma_direct_alloc_no_mapping(dev, size, dma_handle, gfp);
-
-	if (force_dma_unencrypted(dev))
-		printk("this is realm world !!\n\n");
 
 	if (!dev_is_dma_coherent(dev)) {
 		printk("dev is not dma coherent \n\n");
@@ -266,12 +267,10 @@ void *dma_direct_alloc(struct device *dev, size_t size,
 	 * pools if we can't block.
 	 */
 	if (force_dma_unencrypted(dev) && dma_direct_use_pool(dev, gfp)) {
-		printk("force dma unecrypted && dma_direct use pool \n\n");
 		return dma_direct_alloc_from_pool(dev, size, dma_handle, gfp);
 	}
 
 	/* we always manually zero the memory once we are done */
-	//printk("dma_direct_alloc_pages!!!\n\n");
 	page = __dma_direct_alloc_pages(dev, size, gfp & ~__GFP_ZERO, true);
 	if (!page)
 		return NULL;
@@ -284,9 +283,10 @@ void *dma_direct_alloc(struct device *dev, size_t size,
 	if (PageHighMem(page)) {
 		remap = true;
 		set_uncached = false;
-	}
+	} 
 
 	if (remap) {
+		printk("highmem -> remap needed\n");
 		pgprot_t prot = dma_pgprot(dev, PAGE_KERNEL, attrs);
 
 		if (force_dma_unencrypted(dev))
@@ -301,6 +301,7 @@ void *dma_direct_alloc(struct device *dev, size_t size,
 		if (!ret)
 			goto out_free_pages;
 	} else {
+		printk("lowmem -> no-remap!\n");
 		ret = page_address(page);
 		if (dma_set_decrypted(dev, ret, size))
 			goto out_free_pages;

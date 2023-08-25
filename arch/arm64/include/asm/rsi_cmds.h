@@ -13,6 +13,7 @@
 enum ripas {
 	RSI_RIPAS_EMPTY,
 	RSI_RIPAS_RAM,
+	RSI_RIPAS_PORTAL,
 };
 
 static inline unsigned long rsi_get_version(void)

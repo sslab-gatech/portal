@@ -195,7 +195,8 @@ int set_direct_map_default_noflush(struct page *page)
 
 static int __set_memory_encrypted(unsigned long addr,
 				  int numpages,
-				  bool encrypt)
+				  bool encrypt,
+				  bool portal)
 {
 	unsigned long set_prot = 0, clear_prot = 0;
 	phys_addr_t start, end;
@@ -207,12 +208,18 @@ static int __set_memory_encrypted(unsigned long addr,
 	start = __virt_to_phys(addr);
 	end = start + numpages * PAGE_SIZE;
 
-	if (encrypt) {
-		clear_prot = PROT_NS_SHARED;
-		set_memory_range_protected(start, end);
+	if (portal) {
+		set_prot =  PROT_NS_SHARED | PROT_PORTAL;
+		set_memory_range_portal(start, end);
 	} else {
-		set_prot = PROT_NS_SHARED;
-		set_memory_range_shared(start, end);
+		if (encrypt) {
+			clear_prot = PROT_NS_SHARED;
+			set_memory_range_protected(start, end);
+		} else {
+			set_prot = PROT_NS_SHARED;
+			clear_prot = PROT_PORTAL;
+			set_memory_range_shared(start, end);
+		}
 	}
 
 	return __change_memory_common(addr, PAGE_SIZE * numpages,
@@ -222,12 +229,17 @@ static int __set_memory_encrypted(unsigned long addr,
 
 int set_memory_encrypted(unsigned long addr, int numpages)
 {
-	return __set_memory_encrypted(addr, numpages, true);
+	return __set_memory_encrypted(addr, numpages, true, false);
 }
 
 int set_memory_decrypted(unsigned long addr, int numpages)
 {
-	return __set_memory_encrypted(addr, numpages, false);
+	return __set_memory_encrypted(addr, numpages, false, false);
+}
+
+int set_memory_portal(unsigned long addr, int numpages)
+{
+	return __set_memory_encrypted(addr, numpages, false, true);
 }
 
 #ifdef CONFIG_DEBUG_PAGEALLOC

@@ -74,6 +74,7 @@ void __init arm64_rsi_init(void)
 	if (rsi_get_realm_config(&config))
 		return;
 	prot_ns_shared = BIT(config.ipa_bits - 1);
+	printk("PORT_NS_SHARED BIT:%lx\n\n\n\n", prot_ns_shared);
 
 	if (config.ipa_bits - 1 < phys_mask_shift)
 		phys_mask_shift = config.ipa_bits - 1;

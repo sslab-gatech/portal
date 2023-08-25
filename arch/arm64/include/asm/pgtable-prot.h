@@ -36,6 +36,7 @@ extern bool arm64_use_ng_mappings;
 extern unsigned long prot_ns_shared;
 
 #define PROT_NS_SHARED		((prot_ns_shared))
+#define PROT_PORTAL		(PROT_NS_SHARED >> 0x1)
 #define _PROT_DEFAULT		(PTE_TYPE_PAGE | PTE_AF | PTE_SHARED)
 #define _PROT_SECT_DEFAULT	(PMD_TYPE_SECT | PMD_SECT_AF | PMD_SECT_S)
 
