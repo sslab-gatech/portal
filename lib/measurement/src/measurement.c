@@ -18,11 +18,11 @@ static void measurement_print(unsigned char *measurement,
 	unsigned int size = 0U;
 	assert(measurement != NULL);
 
-	VERBOSE("Measurement ");
+	//VERBOSE("Measurement ");
 
 	switch (algorithm) {
 	case HASH_ALGO_SHA256:
-		VERBOSE("(SHA256): 0x");
+		//VERBOSE("(SHA256): 0x");
 		size = SHA256_SIZE;
 		break;
 	case HASH_ALGO_SHA512:
