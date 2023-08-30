@@ -1215,10 +1215,13 @@ static int realm_map_ipa(struct kvm *kvm, phys_addr_t ipa, unsigned long hva,
 	if (WARN_ON(!(prot & KVM_PGTABLE_PROT_W)))
 		return -EFAULT;
 
-	if (!realm_is_addr_protected(realm, ipa))
+	if (!realm_is_addr_protected(realm, ipa)) {
+		//printk("%s:fault_ipa:%lx mapping to unprotected\n", __func__, ipa);
 		return realm_map_non_secure(realm, ipa, page, map_size,
 					    memcache);
+	}
 
+	//printk("%s:fault_ipa:%lx (mapping to protected\n", __func__, ipa);
 	return realm_map_protected(realm, hva, ipa, page, map_size, memcache);
 }
 
@@ -1374,6 +1377,7 @@ static int user_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa,
 		 */
 		writable = false;
 	}
+
 
 	if (exec_fault && device)
 		return -ENOEXEC;

@@ -1030,6 +1030,7 @@ static int dispatch_mmio_read(struct kvm_vcpu *vcpu, struct kvm_io_device *dev,
 	const struct vgic_register_region *region;
 	unsigned long data = 0;
 
+	//printk("%s:handling mmio_read for gic..\n", __func__);
 	region = vgic_get_mmio_region(vcpu, iodev, addr, len);
 	if (!region) {
 		memset(val, 0, len);
