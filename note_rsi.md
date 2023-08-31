@@ -1,4 +1,200 @@
 ## Realm Side
+### DMA related allocations
+```cpp                                                                          
+static inline void *dma_alloc_coherent(struct device *dev, size_t size,         
+                dma_addr_t *dma_handle, gfp_t gfp)                              
+{                                                                               
+        return dma_alloc_attrs(dev, size, dma_handle, gfp,                      
+                        (gfp & __GFP_NOWARN) ? DMA_ATTR_NO_WARN : 0);           
+}           
+```
+
+```cpp
+void *dma_alloc_attrs(struct device *dev, size_t size, dma_addr_t *dma_handle,  
+                gfp_t flag, unsigned long attrs)                                
+{                                                                               
+        const struct dma_map_ops *ops = get_dma_ops(dev);                       
+        void *cpu_addr;                                                         
+                                                                                
+        WARN_ON_ONCE(!dev->coherent_dma_mask);                                  
+                                                                                
+        /*                                                                      
+         * DMA allocations can never be turned back into a page pointer, so     
+         * requesting compound pages doesn't make sense (and can't even be      
+         * supported at all by various backends).                               
+         */                                                                     
+        if (WARN_ON_ONCE(flag & __GFP_COMP))                                    
+                return NULL;                                                    
+                                                                                
+        if (dma_alloc_from_dev_coherent(dev, size, dma_handle, &cpu_addr))      
+                return cpu_addr;                                                
+                                                                                
+        /* let the implementation decide on the zone to allocate from: */       
+        flag &= ~(__GFP_DMA | __GFP_DMA32 | __GFP_HIGHMEM);                     
+                                                                                
+        if (dma_alloc_direct(dev, ops))                                         
+                cpu_addr = dma_direct_alloc(dev, size, dma_handle, flag, attrs);
+        else if (ops->alloc)                                                    
+                cpu_addr = ops->alloc(dev, size, dma_handle, flag, attrs);      
+        else                                                                    
+                return NULL;                                                    
+                                                                                
+        debug_dma_alloc_coherent(dev, size, *dma_handle, cpu_addr, attrs);      
+        return cpu_addr;                                                        
+}
+```
+
+```cpp
+void *dma_direct_alloc(struct device *dev, size_t size,
+                dma_addr_t *dma_handle, gfp_t gfp, unsigned long attrs)
+{
+        bool remap = false, set_uncached = false;
+        struct page *page;
+        void *ret;      
+        
+        size = PAGE_ALIGN(size);
+        if (attrs & DMA_ATTR_NO_WARN)
+                gfp |= __GFP_NOWARN;
+        
+        if ((attrs & DMA_ATTR_NO_KERNEL_MAPPING) &&
+            !force_dma_unencrypted(dev) && !is_swiotlb_for_alloc(dev))
+                return dma_direct_alloc_no_mapping(dev, size, dma_handle, gfp);
+                
+        if (!dev_is_dma_coherent(dev)) {
+                /*
+                 * Fallback to the arch handler if it exists.  This should
+                 * eventually go away.
+                 */
+                if (!IS_ENABLED(CONFIG_ARCH_HAS_DMA_SET_UNCACHED) &&
+                    !IS_ENABLED(CONFIG_DMA_DIRECT_REMAP) &&
+                    !IS_ENABLED(CONFIG_DMA_GLOBAL_POOL) &&
+                    !is_swiotlb_for_alloc(dev)) 
+                        return arch_dma_alloc(dev, size, dma_handle, gfp,
+                                              attrs);
+                
+                /*
+                 * If there is a global pool, always allocate from it for
+                 * non-coherent devices.
+                 */
+                if (IS_ENABLED(CONFIG_DMA_GLOBAL_POOL))
+                        return dma_alloc_from_global_coherent(dev, size,
+                                        dma_handle);
+        
+                /*
+                 * Otherwise remap if the architecture is asking for it.  But
+                 * given that remapping memory is a blocking operation we'll
+                 * instead have to dip into the atomic pools.
+                 */
+                remap = IS_ENABLED(CONFIG_DMA_DIRECT_REMAP);
+                if (remap) {
+                        if (dma_direct_use_pool(dev, gfp))
+                                return dma_direct_alloc_from_pool(dev, size,
+                                                dma_handle, gfp);
+                } else {
+                        if (!IS_ENABLED(CONFIG_ARCH_HAS_DMA_SET_UNCACHED))
+                                return NULL;
+                        set_uncached = true;
+                }
+        }
+
+        /* 
+         * Decrypting memory may block, so allocate the memory from the atomic
+         * pools if we can't block.
+         */     
+        if (force_dma_unencrypted(dev) && dma_direct_use_pool(dev, gfp)) {
+                return dma_direct_alloc_from_pool(dev, size, dma_handle, gfp);
+        }
+
+	/* we always manually zero the memory once we are done */
+        page = __dma_direct_alloc_pages(dev, size, gfp & ~__GFP_ZERO, true);
+        if (!page)
+                return NULL;
+
+        /*
+         * dma_alloc_contiguous can return highmem pages depending on a
+         * combination the cma= arguments and per-arch setup.  These need to be
+         * remapped to return a kernel virtual address.
+         */
+        if (PageHighMem(page)) {
+                remap = true;
+                set_uncached = false;
+        }
+
+        if (remap) {
+                pgprot_t prot = dma_pgprot(dev, PAGE_KERNEL, attrs);
+
+                if (force_dma_unencrypted(dev))
+                        prot = pgprot_decrypted(prot);
+
+                /* remove any dirty cache lines on the kernel alias */
+                arch_dma_prep_coherent(page, size);
+
+                /* create a coherent mapping */
+                ret = dma_common_contiguous_remap(page, size, prot,
+                                __builtin_return_address(0));
+                if (!ret)
+                        goto out_free_pages;
+        } else {
+                ret = page_address(page);
+                if (dma_set_decrypted(dev, ret, size))
+                        goto out_free_pages;
+        }
+
+        memset(ret, 0, size);
+
+        if (set_uncached) {
+                arch_dma_prep_coherent(page, size);
+                ret = arch_dma_set_uncached(ret, size);
+                if (IS_ERR(ret))
+                        goto out_encrypt_pages;
+        }
+
+        *dma_handle = phys_to_dma_direct(dev, page_to_phys(page));
+        return ret;
+
+out_encrypt_pages:
+        if (dma_set_encrypted(dev, page_address(page), size))
+                return NULL;
+out_free_pages:
+        __dma_direct_free_pages(dev, page, size);
+        return NULL;
+}
+```
+
+
+
+
+```cpp
+static int dma_set_decrypted(struct device *dev, void *vaddr, size_t size)
+{       
+        if (!force_dma_unencrypted(dev))
+                return 0;
+        return set_memory_decrypted((unsigned long)vaddr, PFN_UP(size));
+}       
+
+static int dma_set_encrypted(struct device *dev, void *vaddr, size_t size)
+{
+        int ret;
+                
+        if (!force_dma_unencrypted(dev))
+                return 0;
+        ret = set_memory_encrypted((unsigned long)vaddr, PFN_UP(size));
+        if (ret)
+                pr_warn_ratelimited("leaking DMA memory that can't be re-encrypted\n");
+        return ret; 
+}      
+
+int set_memory_encrypted(unsigned long addr, int numpages)
+{
+        return __set_memory_encrypted(addr, numpages, true);
+}
+
+int set_memory_decrypted(unsigned long addr, int numpages)
+{
+        return __set_memory_encrypted(addr, numpages, false);
+}
+```
+
 ```cpp
 static int __set_memory_encrypted(unsigned long addr,
                                   int numpages,
@@ -882,7 +1078,30 @@ As the RIPAS has been changed by the RSI, the IPA should be changed as well.
 Remind that the MSB of the IPA is used to distinguish whether it is mapped to
 trusted or non-trusted IPA. The apply_to_page_range function invokes the passed
 function, changed_page_range for the address range that has been changed due to
-RSI call. 
+RSI call. Note that set_mask is passed from the __set_memory_encrypted function.
+
+```cpp
+void __init arm64_rsi_init(void)
+{
+        if (!rsi_version_matches())
+                return;
+        if (rsi_get_realm_config(&config))
+                return;
+        prot_ns_shared = BIT(config.ipa_bits - 1);
+
+        if (config.ipa_bits - 1 < phys_mask_shift)
+                phys_mask_shift = config.ipa_bits - 1;
+
+        static_branch_enable(&rsi_present);
+}
+```
+
+
+This field has been initialized by the above function to indicate which bit is 
+used to split the address space in guest VM. Therefore, for the case where the 
+memory has been set as decrypted, the set_mask of the data is set with the bit 
+determining the upper half. 
+
 
 ```cpp
 static int change_page_range(pte_t *ptep, unsigned long addr, void *data)

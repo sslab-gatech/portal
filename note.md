@@ -1416,10 +1416,10 @@ static void *iommu_dma_alloc(struct device *dev, size_t size,
 }
 ```
 
-DMA allocation consists of two parts: reserving memory pages to be used as DMA
-pages between the CPU and SMMU device and generating mapping in the IOMMU table.
-The first part is done for the CPU parts and the other part is to allow devices
-to access the shared memory region. 
+DMA allocation consists of two parts: 1.reserving memory pages to be used as DMA
+pages between the CPU and SMMU device and 2.generating mapping in the IOMMU 
+table. The first part is done for the CPU parts and the other part is to allow 
+devices to access the shared memory region. 
 
 ### Reserve DMA memory and retrieve IOVA
 ```cpp
@@ -2123,6 +2123,7 @@ arm_smmu_attach_dev
 
 We trace down from the kernel DMA API interface to observe the application of dma memory and the process of map. Taking dma_alloc_coherent
 as an example, this interface applies for memory according to the user's request, and returns the CPU virtual address and iova.
+
 ```
 dma_alloc_coherent 
   +-> dma_alloc_attrs /* kernel/dma/mapping.c */ 
