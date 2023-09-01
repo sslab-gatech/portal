@@ -11,3 +11,5 @@ out/
 *.dtb
 *.dts
 *.log
+kvmtool
+realm-linux
