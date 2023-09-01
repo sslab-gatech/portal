@@ -178,6 +178,7 @@ int io_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa)
 				      data_buf);
 	}
 
+
 	/* Now prepare kvm_run for the potential return to userland. */
 	run->mmio.is_write	= is_write;
 	run->mmio.phys_addr	= fault_ipa;

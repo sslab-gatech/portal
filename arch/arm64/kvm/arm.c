@@ -1089,6 +1089,10 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu)
 			ret = handle_exit(vcpu, ret);
 	}
 
+	if (vcpu->run->exit_reason == KVM_EXIT_MMIO)
+	printk("%s:exit from kvm run loop due to %d fault-in addr:%lx\n", __func__,
+			vcpu->run->exit_reason, vcpu->run->mmio.phys_addr);
+
 	/* Tell userspace about in-kernel device output levels */
 	if (unlikely(!irqchip_in_kernel(vcpu->kvm))) {
 		kvm_timer_update_run(vcpu);

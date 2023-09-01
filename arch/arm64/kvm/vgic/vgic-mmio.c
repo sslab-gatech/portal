@@ -1113,6 +1113,7 @@ int vgic_register_dist_iodev(struct kvm *kvm, gpa_t dist_base_address,
 	io_device->redist_vcpu = NULL;
 
 	mutex_lock(&kvm->slots_lock);
+	printk("%s\n",__func__);
 	ret = kvm_io_bus_register_dev(kvm, KVM_MMIO_BUS, dist_base_address,
 				      len, &io_device->dev);
 	mutex_unlock(&kvm->slots_lock);

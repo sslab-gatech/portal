@@ -1874,6 +1874,7 @@ static int vgic_register_its_iodev(struct kvm *kvm, struct vgic_its *its,
 	iodev->base_addr = its->vgic_its_base;
 	iodev->iodev_type = IODEV_ITS;
 	iodev->its = its;
+	printk("%s\n", __func__);
 	ret = kvm_io_bus_register_dev(kvm, KVM_MMIO_BUS, iodev->base_addr,
 				      KVM_VGIC_V3_ITS_SIZE, &iodev->dev);
 out:
