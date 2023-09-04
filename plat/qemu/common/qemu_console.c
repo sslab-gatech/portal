@@ -24,6 +24,8 @@ void qemu_console_init(void)
 
 void qemu_console_bl31_init(void)
 {
+	console_switch_state(CONSOLE_FLAG_RUNTIME);
+
 	(void)console_pl011_register(PLAT_QEMU_RUN_UART_BASE,
 			PLAT_QEMU_RUN_UART_CLK_IN_HZ,
 			PLAT_QEMU_CONSOLE_BAUDRATE, &console);
