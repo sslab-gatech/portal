@@ -34,10 +34,12 @@ static void measurement_print(unsigned char *measurement,
 		assert(false);
 	}
 
+#if 0
 	for (unsigned int i = 0U; i < size; ++i) {
 		VERBOSE("%02x", *(measurement+i));
 	}
 	VERBOSE("\n");
+#endif 
 }
 #endif /* LOG_LEVEL */
 
