@@ -12,6 +12,7 @@ make ARCH=arm64 CROSS_COMPILE=$ROOT/toolchain/aarch64-none-linux-gnu/bin/aarch64
 cd ../
 
 
+#mount virtual disk for realm
 sudo modprobe nbd
 sudo qemu-nbd -c /dev/nbd0 ./disk.qcow2
 sudo mount /dev/nbd0p1 /mnt/guest
@@ -23,7 +24,9 @@ sudo cp ./kvmtool/lkvm /mnt/guest
 sudo cp ./launch-realm.sh /mnt/guest
 sudo cp ./rootfs-realm.cpio.gz /mnt/guest
 
+#unmount
 ls /mnt/guest
 sudo umount /mnt/guest
 sudo qemu-nbd -d /dev/nbd0
+
 

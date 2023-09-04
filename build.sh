@@ -5,22 +5,21 @@ rm -rf tf-a/build
 rm ./QEMU_EFI.fd
 rm -rf edk2_build/Build
 rm -rf out/
-
+CORE=$(nproc)
 ROOT=$PWD
 
 # build qemu
 mkdir -p ./qemu/build
 cd ./qemu/build
 ../configure --target-list=aarch64-softmmu --disable-docs 
-make -j 48
+make -j $CORE
 cd ../../
 
 # build RMM
 cd tf-rmm
 export PATH=$ROOT/toolchain/gcc-arm-10.3-2021.07-x86_64-aarch64-none-elf/bin:$PATH
 export CROSS_COMPILE=aarch64-none-elf- 
-#cmake -DRMM_CONFIG=fvp_defcfg -S . -B build 
-cmake -DRMM_CONFIG=fvp_defcfg -S . -B build -DCMAKE_BUILD_TYPE=Debug -DLOG_LEVEL=50 -DRMM_PLATFORM=qemu
+cmake -DRMM_CONFIG=qemu_defcfg -S . -B build -DCMAKE_BUILD_TYPE=Debug -DLOG_LEVEL=50 -DRMM_PLATFORM=qemu
 cmake --build build
 cd ../
 
@@ -46,7 +45,7 @@ cd ../
 
 # Build TF-A for linux
 export PATH=$ROOT/toolchain/gcc-arm-10.3-2021.07-x86_64-aarch64-none-elf/bin:$PATH
-make -C tf-a -j 40 CROSS_COMPILE=aarch64-none-elf- ARCH=aarch64 PLAT=qemu ENABLE_RME=1 ENABLE_PORTAL=1 DEBUG=1 \
+make -C tf-a -j $CORE CROSS_COMPILE=aarch64-none-elf- ARCH=aarch64 PLAT=qemu ENABLE_RME=1 ENABLE_PORTAL=1 DEBUG=1 \
 ARM_LINUX_KERNEL_AS_BL33=1 RMM=../tf-rmm/build/Debug/rmm.img all BL33=../QEMU_EFI.fd all fip
 
 # Build TF-A for tf-a-tests

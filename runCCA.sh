@@ -6,7 +6,10 @@
 #  dtc -I dtb -O dts -o qemu.dts qemu.dtb
 #
 
-sudo ./qemu/build/qemu-system-aarch64 -s -S -nographic -serial telnet::54340,server \
+sudo ./qemu/build/qemu-system-aarch64 -s -S -nographic \
+-serial telnet::5000,server,nowait \
+-serial telnet::5001,server,nowait \
+-serial telnet::5002,server,nowait \
 -smp clusters=2,cores=4 -machine virt,secure=on,rmm=on,virtualization=on,gic-version=3,iommu=smmuv3 \
 -m 2048 -cpu max,lpa2=off \
 -d unimp,guest_errors  -D qemu.log \
