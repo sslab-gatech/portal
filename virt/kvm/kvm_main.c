@@ -5349,9 +5349,11 @@ static int __kvm_io_bus_read(struct kvm_vcpu *vcpu, struct kvm_io_bus *bus,
 
 	while (idx < bus->dev_count &&
 		kvm_io_bus_cmp(range, &bus->range[idx]) == 0) {
+#if 0
 		printk("%s: %p (%lx - %lx)\n", 
 				__func__, bus->range[idx].dev->ops->read,
 				range->addr, (range->addr + range->len));
+#endif 
 		if (!kvm_iodevice_read(vcpu, bus->range[idx].dev, range->addr,
 				       range->len, val))
 			return idx;
