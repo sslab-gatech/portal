@@ -9,6 +9,6 @@
 	--irqchip=gicv3 \
 	-m 256M \
 	-c 1 \
-	-k linux.realm \
+	-k realm-linux \
 	-i rootfs-realm.cpio.gz \
 	-p "earlycon=ttyS0 printk.devkmsg=on"
