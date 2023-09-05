@@ -25,6 +25,7 @@ static inline void set_memory_range(phys_addr_t start, phys_addr_t end,
 	unsigned long ret;
 	phys_addr_t top;
 
+	printk("Guest RSI!%s\n", __func__);
 	while (start != end) {
 		ret = rsi_set_addr_range_state(start, end, state, &top);
 		BUG_ON(ret);
