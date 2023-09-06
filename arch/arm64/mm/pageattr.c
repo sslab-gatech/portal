@@ -217,7 +217,7 @@ static int __set_memory_encrypted(unsigned long addr,
 			set_memory_range_protected(start, end);
 		} else {
 			set_prot = PROT_NS_SHARED;
-			clear_prot = PROT_PORTAL;
+			clear_prot = PROT_PORTAL | PROT_NS_SHARED;
 			set_memory_range_shared(start, end);
 		}
 	}
