@@ -5349,9 +5349,11 @@ static int __kvm_io_bus_read(struct kvm_vcpu *vcpu, struct kvm_io_bus *bus,
 
 	while (idx < bus->dev_count &&
 		kvm_io_bus_cmp(range, &bus->range[idx]) == 0) {
+#if 0
 		printk("%s: %p (%lx - %lx)\n", 
 				__func__, bus->range[idx].dev->ops->read,
 				range->addr, (range->addr + range->len));
+#endif 
 		if (!kvm_iodevice_read(vcpu, bus->range[idx].dev, range->addr,
 				       range->len, val))
 			return idx;
@@ -5377,8 +5379,10 @@ int kvm_io_bus_read(struct kvm_vcpu *vcpu, enum kvm_bus bus_idx, gpa_t addr,
 	bus = srcu_dereference(vcpu->kvm->buses[bus_idx], &vcpu->kvm->srcu);
 	if (!bus)
 		return -ENOMEM;
+#if 0
 	if (bus) 
 		printk("%s: bus found for read \n", __func__);
+#endif 
 	r = __kvm_io_bus_read(vcpu, bus, &range, val);
 	return r < 0 ? r : 0;
 }
@@ -5392,9 +5396,9 @@ int kvm_io_bus_register_dev(struct kvm *kvm, enum kvm_bus bus_idx, gpa_t addr,
 	struct kvm_io_range range;
 
 	if (bus_idx == KVM_MMIO_BUS) {
-		printk("%s:KVM_MMIO_BUS!!\n", __func__);
+		printk("HOST: %s (VM_MMIO_BUS) ", __func__);
 		if (dev->ops->read) 
-			printk("%s:read (%p)\n", __func__, dev->ops->read);
+			printk("%s:read (%p) ", __func__, dev->ops->read);
 		if (dev->ops->write)
 			printk("%s:write (%p)\n", __func__, dev->ops->write);
 	}

@@ -89,6 +89,7 @@ static int rec_exit_ripas_change(struct kvm_vcpu *vcpu)
 	unsigned long ripas = rec->run->exit.ripas_value & 1;
 	int ret = -EINVAL;
 
+	printk("HOST:%s\n", __func__);
 	if (realm_is_addr_protected(realm, base) &&
 	    realm_is_addr_protected(realm, base + size))
 		ret = realm_set_ipa_state(vcpu, base, base + size, ripas);
