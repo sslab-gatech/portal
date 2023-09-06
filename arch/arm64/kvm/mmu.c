@@ -1545,7 +1545,8 @@ int kvm_handle_guest_abort(struct kvm_vcpu *vcpu)
 	gfn = (fault_ipa & ~gpa_stolen_mask) >> PAGE_SHIFT;
 	memslot = gfn_to_memslot(vcpu->kvm, gfn);
 	hva = gfn_to_hva_memslot_prot(memslot, gfn, &writable);
-	printk("fault_ipa:%llx \t hva:%lx\n", fault_ipa, hva);
+	printk("fault_ipa:%llx \t hva:%lx \n", 
+			fault_ipa, hva);
 	write_fault = kvm_is_write_fault(vcpu);
 	if (kvm_is_error_hva(hva) || (write_fault && !writable)) {
 		/*

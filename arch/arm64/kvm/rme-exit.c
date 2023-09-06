@@ -148,6 +148,7 @@ int handle_rme_exit(struct kvm_vcpu *vcpu, int rec_run_ret)
 	status = RMI_RETURN_STATUS(rec_run_ret);
 	index = RMI_RETURN_INDEX(rec_run_ret);
 
+	printk("%s: REC exit_reason:%d\n", __func__, rec->run->exit.exit_reason);
 	/*
 	 * If a PSCI_SYSTEM_OFF request raced with a vcpu executing, we might
 	 * see the following status code and index indicating an attempt to run
