@@ -15,6 +15,9 @@
 static void measurement_print(unsigned char *measurement,
 			      const enum hash_algo algorithm)
 {
+
+	return ;
+#if 0
 	unsigned int size = 0U;
 	assert(measurement != NULL);
 
@@ -34,7 +37,6 @@ static void measurement_print(unsigned char *measurement,
 		assert(false);
 	}
 
-#if 0
 	for (unsigned int i = 0U; i < size; ++i) {
 		VERBOSE("%02x", *(measurement+i));
 	}

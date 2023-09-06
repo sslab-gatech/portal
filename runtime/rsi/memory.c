@@ -9,6 +9,7 @@
 #include <rsi-memory.h>
 #include <smc-rsi.h>
 #include <status.h>
+#include <debug.h>
 
 bool handle_rsi_ipa_state_set(struct rec *rec, struct rmi_rec_exit *rec_exit)
 {
@@ -16,6 +17,7 @@ bool handle_rsi_ipa_state_set(struct rec *rec, struct rmi_rec_exit *rec_exit)
 	unsigned long size = rec->regs[2];
 	unsigned long end = start + size;
 	enum ripas ripas = (enum ripas)rec->regs[3];
+	INFO("%s: %lx-%lx RIPAS:%d\n",__func__,start,end, ripas);
 
 	if (ripas > RIPAS_RAM) {
 		return true;
