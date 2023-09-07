@@ -1216,7 +1216,7 @@ static int realm_map_ipa(struct kvm *kvm, phys_addr_t ipa, unsigned long hva,
 		return -EFAULT;
 
 	if (!realm_is_addr_protected(realm, ipa)) {
-		//printk("%s:fault_ipa:%lx mapping to unprotected\n", __func__, ipa);
+		printk("%s:fault_ipa:%lx mapping to unprotected\n", __func__, ipa);
 		return realm_map_non_secure(realm, ipa, page, map_size,
 					    memcache);
 	}
@@ -1545,9 +1545,10 @@ int kvm_handle_guest_abort(struct kvm_vcpu *vcpu)
 	gfn = (fault_ipa & ~gpa_stolen_mask) >> PAGE_SHIFT;
 	memslot = gfn_to_memslot(vcpu->kvm, gfn);
 	hva = gfn_to_hva_memslot_prot(memslot, gfn, &writable);
-	printk("fault_ipa:%llx \t hva:%lx \n", 
-			fault_ipa, hva);
 	write_fault = kvm_is_write_fault(vcpu);
+	printk("fault_ipa:%llx instruction abort?:%d write_fault:%d is_protected?:%d fault_status:%x\n", 
+			fault_ipa, is_iabt, write_fault,
+		       	realm_is_addr_protected(&vcpu->kvm->arch.realm, fault_ipa), fault_status);
 	if (kvm_is_error_hva(hva) || (write_fault && !writable)) {
 		/*
 		 * The guest has put either its instructions or its page-tables
@@ -1555,6 +1556,9 @@ int kvm_handle_guest_abort(struct kvm_vcpu *vcpu)
 		 * anything about this (there's no syndrome for a start), so
 		 * re-inject the abort back into the guest.
 		 */
+		printk("error in hva?:%d \t write_fault:%d \t writable:%d \n",
+				kvm_is_error_hva(hva), write_fault, writable);
+
 		if (is_iabt) {
 			ret = -ENOEXEC;
 			goto out;
@@ -1588,6 +1592,7 @@ int kvm_handle_guest_abort(struct kvm_vcpu *vcpu)
 		 * faulting VA. This is always 12 bits, irrespective
 		 * of the page size.
 		 */
+		//this is how to calculate fault ipa exactly
 		fault_ipa |= kvm_vcpu_get_hfar(vcpu) & ((1 << 12) - 1);
 		fault_ipa &= ~gpa_stolen_mask;
 		ret = io_mem_abort(vcpu, fault_ipa);

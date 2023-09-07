@@ -160,6 +160,7 @@ int io_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa)
 	len = kvm_vcpu_dabt_get_as(vcpu);
 	rt = kvm_vcpu_dabt_get_rd(vcpu);
 
+	printk("%s:fault_ipa:%llx, is_write:%d\n", __func__, fault_ipa, is_write);
 	//this is where the mmio is emulated by the kvm..
 	if (is_write) {
 		data = vcpu_data_guest_to_host(vcpu, vcpu_get_reg(vcpu, rt),
@@ -178,7 +179,6 @@ int io_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa)
 				      data_buf);
 	}
 
-
 	/* Now prepare kvm_run for the potential return to userland. */
 	run->mmio.is_write	= is_write;
 	run->mmio.phys_addr	= fault_ipa;
@@ -190,6 +190,7 @@ int io_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa)
 
 	if (!ret) {
 		/* We handled the access successfully in the kernel. */
+		printk("MMIO Handled in kernel, no user exit!\n");
 		if (!is_write)
 			memcpy(run->mmio.data, data_buf, len);
 		vcpu->stat.mmio_exit_kernel++;
@@ -197,6 +198,7 @@ int io_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa)
 		return 1;
 	}
 
+	printk("MMIO needs to be handled in user!\n");
 	if (is_write)
 		memcpy(run->mmio.data, data_buf, len);
 	vcpu->stat.mmio_exit_user++;
