@@ -1546,9 +1546,11 @@ int kvm_handle_guest_abort(struct kvm_vcpu *vcpu)
 	memslot = gfn_to_memslot(vcpu->kvm, gfn);
 	hva = gfn_to_hva_memslot_prot(memslot, gfn, &writable);
 	write_fault = kvm_is_write_fault(vcpu);
+#if 0
 	printk("fault_ipa:%llx instruction abort?:%d write_fault:%d is_protected?:%d fault_status:%x\n", 
 			fault_ipa, is_iabt, write_fault,
 		       	realm_is_addr_protected(&vcpu->kvm->arch.realm, fault_ipa), fault_status);
+#endif 
 	if (kvm_is_error_hva(hva) || (write_fault && !writable)) {
 		/*
 		 * The guest has put either its instructions or its page-tables
