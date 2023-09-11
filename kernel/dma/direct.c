@@ -283,7 +283,10 @@ void *dma_direct_alloc(struct device *dev, size_t size,
 	if (PageHighMem(page)) {
 		remap = true;
 		set_uncached = false;
-	} 
+		printk("GFP:%llx -> Page:%llx HighMem\n");
+	}  else {
+		printk("GFP:%llx -> Page:%llx lowMem\n");
+	}
 
 	if (remap) {
 		printk("highmem -> remap needed\n");

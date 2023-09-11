@@ -208,6 +208,8 @@ static int __set_memory_encrypted(unsigned long addr,
 	start = __virt_to_phys(addr);
 	end = start + numpages * PAGE_SIZE;
 
+	printk("Encrypt[%d] Portal[%d] : addr %lx\n", 
+			(encrypt? 1: 0), (portal? 1: 0), addr)
 	if (portal) {
 		set_prot =  PROT_NS_SHARED | PROT_PORTAL;
 		set_memory_range_portal(start, end);
@@ -217,7 +219,7 @@ static int __set_memory_encrypted(unsigned long addr,
 			set_memory_range_protected(start, end);
 		} else {
 			set_prot = PROT_NS_SHARED;
-			clear_prot = PROT_PORTAL | PROT_NS_SHARED;
+			//clear_prot = PROT_PORTAL | PROT_NS_SHARED;
 			set_memory_range_shared(start, end);
 		}
 	}
