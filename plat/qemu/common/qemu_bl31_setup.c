@@ -59,8 +59,8 @@ void bl31_early_platform_setup2(u_register_t arg0, u_register_t arg1,
 				u_register_t arg2, u_register_t arg3)
 {
 	/* Initialize the console to provide early debug support */
-	//qemu_console_init();
-	qemu_console_bl31_init();
+	qemu_console_init();
+	//qemu_console_bl31_init(); //for prining tf-a
 	/*
 	 * Check params passed from BL2
 	 */

@@ -167,11 +167,14 @@ int __init smmuv3_init(uintptr_t smmu_base)
 	 * the SMMU_S_INIT.INV_ALL mechanism also invalidates GPT information
 	 * cached in TLBs.
 	 */
+	return 0;
+#if 0	//QEMU doesn't implement S_reg so just return 
 	mmio_write_32(smmu_base + SMMU_S_INIT, SMMU_S_INIT_INV_ALL);
 
 	/* Wait for global invalidation operation to finish */
 	return smmuv3_poll(smmu_base + SMMU_S_INIT,
 				SMMU_S_INIT_INV_ALL, 0U);
+#endif 
 }
 
 int smmuv3_ns_set_abort_all(uintptr_t smmu_base)
