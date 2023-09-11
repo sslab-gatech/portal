@@ -7,20 +7,21 @@
 #
 
 sudo ./qemu/build/qemu-system-aarch64 -s -S -nographic \
--serial telnet::5000,server,nowait \
--serial telnet::5001,server,nowait \
--serial telnet::5002,server,nowait \
+-serial telnet::6000,server,nowait \
 -smp clusters=2,cores=4 -machine virt,secure=on,rmm=on,virtualization=on,gic-version=3,iommu=smmuv3 \
 -m 2048 -cpu max,lpa2=off \
--d unimp,guest_errors  -D qemu.log \
+-d unimp,guest_errors \
 -initrd initrd \
 -hda disk.qcow2 -append "root=/dev/vda1" \
 -kernel ./nw-linux/arch/arm64/boot/Image \
--netdev user,id=net0 -device e1000,netdev=net0 \
--netdev user,id=net1 -device virtio-net-pci,netdev=net1 \
 -bios flash.bin 
 #
-#-drive format=qcow2,file=./disk.qcow2 \
+#-serial telnet::6001,server,nowait \
+#-serial telnet::6002,server,nowait \
+#
+#-netdev user,id=net0 -device e1000,netdev=net0 \
+#-netdev user,id=net1 -device virtio-net-pci,netdev=net1 \
+#-smp clusters=2,cores=4 -machine virt,secure=on,rmm=on,virtualization=on,gic-version=3,iommu=smmuv3 \
 
 
 #-drive file=blknvme,if=none,id=nvm \

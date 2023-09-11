@@ -1,10 +1,6 @@
-ROOT=$PWD
+ROOT=$(pwd)
 NUM_PROC=$(nproc)
-#build realm-linux
-cp ./linux-mk-scripts/common-realm.mk ./optee-build/common.mk
-cd optee-build
-make -j $NUM_PROC -f qemu_v8.mk linux
-cd ../
+make -C $ROOT/realm/linux
 
 #build kvmtool
 cd kvmtool 
@@ -14,19 +10,18 @@ cd ../
 
 #mount virtual disk for realm
 sudo modprobe nbd
-sudo qemu-nbd -c /dev/nbd0 ./disk.qcow2
-sudo mount /dev/nbd0p1 /mnt/guest
+sudo qemu-nbd -c /dev/nbd0 ./disk.qcow2; sudo mount /dev/nbd0p1 /mnt/guest
 
 #copy needed script & image to qcow
 sudo rm -rf /mnt/guest/*
 sudo cp ./realm-linux/arch/arm64/boot/Image /mnt/guest/realm-linux
-sudo cp ./kvmtool/lkvm /mnt/guest
-sudo cp ./launch-realm.sh /mnt/guest
-sudo cp ./rootfs-realm.cpio.gz /mnt/guest
+sudo cp ./kvmtool/lkvm /mnt/guest/
+sudo cp ./launch-realm.sh /mnt/guest/
+sudo cp ./rootfs-realm.cpio.gz /mnt/guest/
+cat /mnt/guest/launch-realm.sh
 
 #unmount
 ls /mnt/guest
-sudo umount /mnt/guest
-sudo qemu-nbd -d /dev/nbd0
+sudo umount /mnt/guest; sudo qemu-nbd -d /dev/nbd0
 
 
