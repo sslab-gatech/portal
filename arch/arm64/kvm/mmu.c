@@ -1216,7 +1216,7 @@ static int realm_map_ipa(struct kvm *kvm, phys_addr_t ipa, unsigned long hva,
 		return -EFAULT;
 
 	if (!realm_is_addr_protected(realm, ipa)) {
-		printk("%s:fault_ipa:%lx mapping to unprotected\n", __func__, ipa);
+		printk("%s:fault_ipa:%llx mapping to unprotected\n", __func__, ipa);
 		return realm_map_non_secure(realm, ipa, page, map_size,
 					    memcache);
 	}
@@ -1558,8 +1558,10 @@ int kvm_handle_guest_abort(struct kvm_vcpu *vcpu)
 		 * anything about this (there's no syndrome for a start), so
 		 * re-inject the abort back into the guest.
 		 */
+#if 0
 		printk("error in hva?:%d \t write_fault:%d \t writable:%d \n",
 				kvm_is_error_hva(hva), write_fault, writable);
+#endif 
 
 		if (is_iabt) {
 			ret = -ENOEXEC;

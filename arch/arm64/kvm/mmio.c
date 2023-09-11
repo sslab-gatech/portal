@@ -198,7 +198,7 @@ int io_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa)
 		return 1;
 	}
 
-	printk("MMIO needs to be handled in user!\n");
+	//printk("MMIO needs to be handled in user!\n");
 	if (is_write)
 		memcpy(run->mmio.data, data_buf, len);
 	vcpu->stat.mmio_exit_user++;
