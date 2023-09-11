@@ -714,7 +714,6 @@ static bool handle_exception_irq_lel(struct rec *rec, struct rmi_rec_exit *rec_e
 /* Returns 'true' when returning to Realm (S) and false when to NS */
 bool handle_realm_exit(struct rec *rec, struct rmi_rec_exit *rec_exit, int exception)
 {
-	INFO("%s: far:%lx \thpfar:%lx \n", __func__, read_far_el2(), read_hpfar_el2() << 8);
 	switch (exception) {
 	case ARM_EXCEPTION_SYNC_LEL: {
 		bool ret;

@@ -949,9 +949,9 @@ unsigned long smc_data_create(unsigned long data_addr,
 	return ret;
 }
 
-unsigned long smc_data_create_unknown(unsigned long data_addr,
+unsigned long smc_data_create_unknown(unsigned long data_addr, //physical page addr (HPA)
 				      unsigned long rd_addr,
-				      unsigned long map_addr)
+				      unsigned long map_addr) //ipa of the vm (GPA)
 {
 	return data_create(data_addr, rd_addr, map_addr, NULL, 0);
 }
