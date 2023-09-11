@@ -33,7 +33,7 @@ static inline void set_memory_range(phys_addr_t start, phys_addr_t end,
 		BUG_ON(top > end);
 		start = top;
 	}
-	printk("Guest RSI!%s done\n");
+	printk("Guest RSI!%s done\n", __func__);
 }
 
 static inline void set_memory_range_protected(phys_addr_t start, phys_addr_t end)
