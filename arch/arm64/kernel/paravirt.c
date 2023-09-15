@@ -23,6 +23,7 @@
 #include <asm/paravirt.h>
 #include <asm/pvclock-abi.h>
 #include <asm/smp_plat.h>
+#include <asm/rsi.h>
 
 struct static_key paravirt_steal_enabled;
 struct static_key paravirt_steal_rq_enabled;
@@ -140,6 +141,9 @@ static int __init pv_time_init_stolen_time(void)
 static bool __init has_pv_steal_clock(void)
 {
 	struct arm_smccc_res res;
+	//Invalid RSI function_id = 80000001^M
+	rsi_host_debug(ARM_SMCCC_ARCH_FEATURES_FUNC_ID);
+	rsi_host_debug(ARM_SMCCC_HV_PV_TIME_FEATURES);
 
 	arm_smccc_1_1_invoke(ARM_SMCCC_ARCH_FEATURES_FUNC_ID,
 			     ARM_SMCCC_HV_PV_TIME_FEATURES, &res);

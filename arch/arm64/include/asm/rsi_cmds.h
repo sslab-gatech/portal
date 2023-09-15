@@ -69,4 +69,15 @@ static inline unsigned long rsi_set_addr_range_state(phys_addr_t start,
 	return res.a0;
 }
 
+static inline unsigned long rsi_host_debug(unsigned long debugId)
+{
+	struct arm_smccc_res res;
+
+	invoke_rsi_fn_smc_with_res(SMC_RSI_HOST_DEBUG,
+				   debugId, 0, 0, 0, &res);
+
+	return res.a0;
+}
+
+
 #endif

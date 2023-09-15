@@ -25,6 +25,7 @@
 #include <asm/softirq_stack.h>
 #include <asm/stacktrace.h>
 #include <asm/vmap_stack.h>
+#include <asm/rsi.h>
 
 /* Only access this in an NMI enter/exit */
 DEFINE_PER_CPU(struct nmi_ctx, nmi_contexts);
@@ -124,6 +125,7 @@ void __init init_IRQ(void)
 	init_irq_stacks();
 	init_irq_scs();
 	irqchip_init();
+	rsi_host_debug(7);
 
 	if (system_uses_irq_prio_masking()) {
 		/*

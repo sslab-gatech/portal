@@ -47,6 +47,7 @@ int gic_configure_irq(unsigned int irq, unsigned int type,
 	int ret = 0;
 	unsigned long flags;
 
+	pr_info("%s: Irq(%d) type(%d) base:%p\n",  __func__, irq, type, base);
 	/*
 	 * Read current configuration register, and insert the config
 	 * for "irq", depending on "type".

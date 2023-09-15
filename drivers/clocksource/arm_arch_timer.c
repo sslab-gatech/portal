@@ -31,6 +31,7 @@
 
 #include <asm/arch_timer.h>
 #include <asm/virt.h>
+#include <asm/rsi.h>
 
 #include <clocksource/arm_arch_timer.h>
 
@@ -1184,7 +1185,7 @@ static int __init arch_timer_register(void)
 {
 	int err;
 	int ppi;
-
+	int rate; 
 	arch_timer_evt = alloc_percpu(struct clock_event_device);
 	if (!arch_timer_evt) {
 		err = -ENOMEM;
@@ -1194,6 +1195,7 @@ static int __init arch_timer_register(void)
 	ppi = arch_timer_ppi[arch_timer_uses_ppi];
 	switch (arch_timer_uses_ppi) {
 	case ARCH_TIMER_VIRT_PPI:
+		rsi_host_debug(0xBBBBBBBB);
 		err = request_percpu_irq(ppi, arch_timer_handler_virt,
 					 "arch_timer", arch_timer_evt);
 		break;
@@ -1228,9 +1230,13 @@ static int __init arch_timer_register(void)
 		goto out_unreg_notify;
 
 	/* Register and immediately configure the timer on the boot CPU */
+	if (err)
 	err = cpuhp_setup_state(CPUHP_AP_ARM_ARCH_TIMER_STARTING,
 				"clockevents/arm/arch_timer:starting",
 				arch_timer_starting_cpu, arch_timer_dying_cpu);
+	for (rate = 0; rate < 15000; rate ++)
+		rsi_host_debug(115000 + rate);
+	rsi_host_debug((unsigned long)arch_timer_uses_ppi);
 	if (err)
 		goto out_unreg_cpupm;
 	return 0;
@@ -1389,6 +1395,7 @@ static int __init arch_timer_of_init(struct device_node *np)
 	arch_timer_populate_kvm_info();
 
 	rate = arch_timer_get_cntfrq();
+
 	arch_timer_of_configure_rate(rate, np);
 
 	arch_timer_c3stop = !of_property_read_bool(np, "always-on");
@@ -1415,13 +1422,15 @@ static int __init arch_timer_of_init(struct device_node *np)
 	arch_counter_suspend_stop = of_property_read_bool(np,
 							 "arm,no-tick-in-suspend");
 
-	ret = arch_timer_register();
+	ret = arch_timer_register();// this is the problematic func
+
 	if (ret)
 		return ret;
 
 	if (arch_timer_needs_of_probing())
 		return 0;
 
+	rsi_host_debug(6001);
 	return arch_timer_common_init();
 }
 TIMER_OF_DECLARE(armv7_arch_timer, "arm,armv7-timer", arch_timer_of_init);

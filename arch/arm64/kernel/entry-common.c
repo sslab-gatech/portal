@@ -26,6 +26,7 @@
 #include <asm/stacktrace.h>
 #include <asm/sysreg.h>
 #include <asm/system_misc.h>
+#include <asm/rsi.h>
 
 /*
  * Handle IRQ/context state management when entering from kernel mode.
@@ -364,7 +365,7 @@ static void noinstr el1_abort(struct pt_regs *regs, unsigned long esr)
 
 	enter_from_kernel_mode(regs);
 	local_daif_inherit(regs);
-	do_mem_abort(far, esr, regs);
+	do_mem_abort(far, esr, regs); //problematic func
 	local_daif_mask();
 	exit_to_kernel_mode(regs);
 }

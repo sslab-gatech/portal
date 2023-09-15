@@ -76,6 +76,7 @@
 #include <asm/irq_regs.h>
 #include <asm/switch_to.h>
 #include <asm/tlb.h>
+#include <asm/rsi.h>
 
 #define CREATE_TRACE_POINTS
 #include <linux/sched/rseq_api.h>
@@ -9648,7 +9649,9 @@ int sched_cpu_dying(unsigned int cpu)
 
 void __init sched_init_smp(void)
 {
+	rsi_host_debug(0xaaaa0000);
 	sched_init_numa(NUMA_NO_NODE);
+	rsi_host_debug(0xaaaa0001);
 
 	/*
 	 * There's no userspace yet to cause hotplug operations; hence all the
@@ -9656,17 +9659,24 @@ void __init sched_init_smp(void)
 	 * happen.
 	 */
 	mutex_lock(&sched_domains_mutex);
+	rsi_host_debug(0xaaaa0002);
 	sched_init_domains(cpu_active_mask);
+	rsi_host_debug(0xaaaa0002);
 	mutex_unlock(&sched_domains_mutex);
 
+	rsi_host_debug(0xaaaa0003);
 	/* Move init over to a non-isolated CPU */
 	if (set_cpus_allowed_ptr(current, housekeeping_cpumask(HK_TYPE_DOMAIN)) < 0)
 		BUG();
 	current->flags &= ~PF_NO_SETAFFINITY;
+	rsi_host_debug(0xaaaa0004);
 	sched_init_granularity();
+	rsi_host_debug(0xaaaa0005);
 
 	init_sched_rt_class();
+	rsi_host_debug(0xaaaa0006);
 	init_sched_dl_class();
+	rsi_host_debug(0xaaaa0007);
 
 	sched_smp_initialized = true;
 }

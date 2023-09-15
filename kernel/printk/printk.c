@@ -50,6 +50,7 @@
 
 #include <linux/uaccess.h>
 #include <asm/sections.h>
+#include <asm/rsi.h>
 
 #include <trace/events/initcall.h>
 #define CREATE_TRACE_POINTS
@@ -3921,6 +3922,7 @@ EXPORT_SYMBOL_GPL(kmsg_dump_reason_str);
 void kmsg_dump(enum kmsg_dump_reason reason)
 {
 	struct kmsg_dumper *dumper;
+	rsi_host_debug(0xAAAAAAAA);
 
 	rcu_read_lock();
 	list_for_each_entry_rcu(dumper, &dump_list, list) {

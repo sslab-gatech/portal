@@ -3,6 +3,7 @@
  * Scheduler topology setup/handling methods
  */
 
+#include <asm/rsi.h>
 DEFINE_MUTEX(sched_domains_mutex);
 
 /* Protected by sched_domains_mutex: */
@@ -587,17 +588,24 @@ void init_defrootdomain(void)
 
 static struct root_domain *alloc_rootdomain(void)
 {
+	int i = 0;
 	struct root_domain *rd;
-
+	for (i = 0; i < 10; i ++) {
+		rsi_host_debug(0xaaaa0 + i);
+	}
 	rd = kzalloc(sizeof(*rd), GFP_KERNEL);
+	rsi_host_debug(0xaaaa1);
 	if (!rd)
 		return NULL;
 
+	rsi_host_debug(0xaaaa2);
 	if (init_rootdomain(rd) != 0) {
+		rsi_host_debug(0xaaaa0);
 		kfree(rd);
 		return NULL;
 	}
 
+	rsi_host_debug(0xaaaa3);
 	return rd;
 }
 
@@ -1467,16 +1475,23 @@ static void __free_domain_allocs(struct s_data *d, enum s_alloc what,
 static enum s_alloc
 __visit_domain_allocation_hell(struct s_data *d, const struct cpumask *cpu_map)
 {
+	rsi_host_debug(0xdddd0);
 	memset(d, 0, sizeof(*d));
 
-	if (__sdt_alloc(cpu_map))
+	rsi_host_debug(0xdddd1);
+	if (__sdt_alloc(cpu_map)) 
 		return sa_sd_storage;
+	rsi_host_debug(0xdddd2);
 	d->sd = alloc_percpu(struct sched_domain *);
+	rsi_host_debug(0xdddd3);
 	if (!d->sd)
 		return sa_sd_storage;
+	rsi_host_debug(0xdddd4);
 	d->rd = alloc_rootdomain();
+	rsi_host_debug(0xdddd5);
 	if (!d->rd)
 		return sa_sd;
+	rsi_host_debug(0xdddd6);
 
 	return sa_rootdomain;
 }
@@ -2257,13 +2272,16 @@ build_sched_domains(const struct cpumask *cpu_map, struct sched_domain_attr *att
 	if (WARN_ON(cpumask_empty(cpu_map)))
 		goto error;
 
+	rsi_host_debug(0xaaaa0);
 	alloc_state = __visit_domain_allocation_hell(&d, cpu_map);
+	rsi_host_debug(0xaaaa1);
 	if (alloc_state != sa_rootdomain)
 		goto error;
 
 	/* Set up domains for CPUs specified by the cpu_map: */
 	for_each_cpu(i, cpu_map) {
 		struct sched_domain_topology_level *tl;
+		rsi_host_debug(0xaaaa2);
 
 		sd = NULL;
 		for_each_sd_topology(tl) {
@@ -2286,6 +2304,7 @@ build_sched_domains(const struct cpumask *cpu_map, struct sched_domain_attr *att
 
 	/* Build the groups for the domains */
 	for_each_cpu(i, cpu_map) {
+		rsi_host_debug(0xaaaa3);
 		for (sd = *per_cpu_ptr(d.sd, i); sd; sd = sd->parent) {
 			sd->span_weight = cpumask_weight(sched_domain_span(sd));
 			if (sd->flags & SD_OVERLAP) {
@@ -2305,6 +2324,7 @@ build_sched_domains(const struct cpumask *cpu_map, struct sched_domain_attr *att
 	for_each_cpu(i, cpu_map) {
 		unsigned int imb = 0;
 		unsigned int imb_span = 1;
+		rsi_host_debug(0xaaaa4);
 
 		for (sd = *per_cpu_ptr(d.sd, i); sd; sd = sd->parent) {
 			struct sched_domain *child = sd->child;
@@ -2358,6 +2378,7 @@ build_sched_domains(const struct cpumask *cpu_map, struct sched_domain_attr *att
 
 	/* Calculate CPU capacity for physical packages and nodes */
 	for (i = nr_cpumask_bits-1; i >= 0; i--) {
+		rsi_host_debug(0xaaaa5);
 		if (!cpumask_test_cpu(i, cpu_map))
 			continue;
 
@@ -2459,14 +2480,19 @@ int sched_init_domains(const struct cpumask *cpu_map)
 	zalloc_cpumask_var(&sched_domains_tmpmask2, GFP_KERNEL);
 	zalloc_cpumask_var(&fallback_doms, GFP_KERNEL);
 
+	rsi_host_debug(0xcccc0);
 	arch_update_cpu_topology();
+	rsi_host_debug(0xcccc1);
 	asym_cpu_capacity_scan();
+	rsi_host_debug(0xcccc2);
 	ndoms_cur = 1;
 	doms_cur = alloc_sched_domains(ndoms_cur);
+	rsi_host_debug(0xcccc3);
 	if (!doms_cur)
 		doms_cur = &fallback_doms;
 	cpumask_and(doms_cur[0], cpu_map, housekeeping_cpumask(HK_TYPE_DOMAIN));
 	err = build_sched_domains(doms_cur[0], NULL);
+	rsi_host_debug(0xcccc4);
 
 	return err;
 }

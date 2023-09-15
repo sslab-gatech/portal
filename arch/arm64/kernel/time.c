@@ -31,6 +31,7 @@
 
 #include <asm/thread_info.h>
 #include <asm/paravirt.h>
+#include <asm/rsi.h>
 
 static bool profile_pc_cb(void *arg, unsigned long pc)
 {
@@ -55,18 +56,28 @@ EXPORT_SYMBOL(profile_pc);
 void __init time_init(void)
 {
 	u32 arch_timer_rate;
+	rsi_host_debug(1000);
 
 	of_clk_init(NULL);
+
+	rsi_host_debug(1001);
 	timer_probe();
+	rsi_host_debug(1002);
+
 
 	tick_setup_hrtimer_broadcast();
+	rsi_host_debug(1003);
 
 	arch_timer_rate = arch_timer_get_rate();
-	if (!arch_timer_rate)
+	rsi_host_debug(1004);
+	if (!arch_timer_rate) {
+		rsi_host_debug(1005);
 		panic("Unable to initialise architected timer.\n");
+	}
 
 	/* Calibrate the delay loop directly */
 	lpj_fine = arch_timer_rate / HZ;
 
 	pv_time_init();
+	rsi_host_debug(1006);
 }

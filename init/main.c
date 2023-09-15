@@ -108,6 +108,7 @@
 #include <asm/setup.h>
 #include <asm/sections.h>
 #include <asm/cacheflush.h>
+#include <asm/rsi.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/initcall.h>
@@ -941,6 +942,7 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 {
 	char *command_line;
 	char *after_dashes;
+	int i ;
 
 	set_task_stack_end_magic(&init_task);
 	smp_setup_processor_id();
@@ -1041,33 +1043,51 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 
 	context_tracking_init();
 	/* init some links before init_ISA_irqs() */
+	rsi_host_debug(0);
 	early_irq_init();
 	init_IRQ();
+	rsi_host_debug(8);
 	tick_init();
+	rsi_host_debug(9);
 	rcu_init_nohz();
+	rsi_host_debug(10);
 	init_timers();
+	rsi_host_debug(11);
 	srcu_init();
+	rsi_host_debug(12);
 	hrtimers_init();
+	rsi_host_debug(13);
 	softirq_init();
+	rsi_host_debug(14);
 	timekeeping_init();
+	rsi_host_debug(15);
 	time_init();
+	rsi_host_debug(16);
 
 	/* This must be after timekeeping is initialized */
 	random_init();
+	rsi_host_debug(17);
 
 	/* These make use of the fully initialized rng */
 	kfence_init();
+	rsi_host_debug(18);
 	boot_init_stack_canary();
+	rsi_host_debug(19);
 
 	perf_event_init();
+	rsi_host_debug(20);
 	profile_init();
+	rsi_host_debug(21);
 	call_function_init();
+	rsi_host_debug(22);
 	WARN(!irqs_disabled(), "Interrupts were enabled early\n");
 
 	early_boot_irqs_disabled = false;
 	local_irq_enable();
+	rsi_host_debug(23);
 
 	kmem_cache_init_late();
+	rsi_host_debug(24);
 
 	/*
 	 * HACK ALERT! This is early. We're enabling the console before
@@ -1075,11 +1095,16 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	 * this. But we do want output early, in case something goes wrong.
 	 */
 	console_init();
-	if (panic_later)
+	rsi_host_debug(25);
+	if (panic_later) {
+		rsi_host_debug(0xcafebabe);
 		panic("Too many boot %s vars at `%s'", panic_later,
 		      panic_param);
+	}
 
+	rsi_host_debug(26);
 	lockdep_init();
+	rsi_host_debug(27);
 
 	/*
 	 * Need to run this when irqs are enabled, because it wants
@@ -1087,6 +1112,7 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	 * too:
 	 */
 	locking_selftest();
+	rsi_host_debug(28);
 
 	/*
 	 * This needs to be called before any devices perform DMA
@@ -1095,6 +1121,7 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	 * not cause "plain-text" data to be decrypted when accessed.
 	 */
 	mem_encrypt_init();
+	rsi_host_debug(29);
 
 #ifdef CONFIG_BLK_DEV_INITRD
 	if (initrd_start && !initrd_below_start_ok &&
@@ -1107,9 +1134,12 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 #endif
 	setup_per_cpu_pageset();
 	numa_policy_init();
+	rsi_host_debug(30);
 	acpi_early_init();
+	rsi_host_debug(31);
 	if (late_time_init)
 		late_time_init();
+	rsi_host_debug(32);
 	sched_clock_init();
 	calibrate_delay();
 	pid_idr_init();
@@ -1118,36 +1148,64 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	if (efi_enabled(EFI_RUNTIME_SERVICES))
 		efi_enter_virtual_mode();
 #endif
+	rsi_host_debug(33);
 	thread_stack_cache_init();
+	rsi_host_debug(34);
 	cred_init();
+	rsi_host_debug(35);
 	fork_init();
+	rsi_host_debug(36);
 	proc_caches_init();
+	rsi_host_debug(37);
 	uts_ns_init();
+	rsi_host_debug(38);
 	key_init();
+	rsi_host_debug(39);
 	security_init();
+	rsi_host_debug(40);
 	dbg_late_init();
+	rsi_host_debug(41);
 	net_ns_init();
+	rsi_host_debug(42);
 	vfs_caches_init();
+	rsi_host_debug(43);
 	pagecache_init();
+	rsi_host_debug(44);
 	signals_init();
+	rsi_host_debug(45);
 	seq_file_init();
+	rsi_host_debug(46);
 	proc_root_init();
+	rsi_host_debug(47);
 	nsfs_init();
+	rsi_host_debug(48);
 	cpuset_init();
+	rsi_host_debug(49);
 	cgroup_init();
+	rsi_host_debug(50);
 	taskstats_init_early();
+	rsi_host_debug(51);
 	delayacct_init();
+	rsi_host_debug(52);
 
 	check_bugs();
+	rsi_host_debug(53);
 
 	acpi_subsystem_init();
+	rsi_host_debug(54);
 	arch_post_acpi_subsys_init();
+	rsi_host_debug(55);
 	kcsan_init();
+	rsi_host_debug(56);
+	for (i = 0 ; i < 500; i++)
+		rsi_host_debug(i);
 
 	/* Do the rest non-__init'ed, we're now alive */
 	arch_call_rest_init();
+	rsi_host_debug(57);
 
 	prevent_tail_call_optimization();
+	rsi_host_debug(58);
 }
 
 /* Call all constructor functions linked into the kernel. */
@@ -1517,9 +1575,11 @@ static int __ref kernel_init(void *unused)
 	/*
 	 * Wait until kthreadd is all set-up.
 	 */
+	rsi_host_debug(0xcafe0000);
 	wait_for_completion(&kthreadd_done);
-
+	rsi_host_debug(0xcafe0001);
 	kernel_init_freeable();
+	rsi_host_debug(0xcafe0002);
 	/* need to finish all async __init code before freeing the memory */
 	async_synchronize_full();
 
@@ -1530,6 +1590,7 @@ static int __ref kernel_init(void *unused)
 	exit_boot_config();
 	free_initmem();
 	mark_readonly();
+	rsi_host_debug(0xcafe0003);
 
 	/*
 	 * Kernel mappings are now finalized - update the userspace page-table
@@ -1543,6 +1604,7 @@ static int __ref kernel_init(void *unused)
 	rcu_end_inkernel_boot();
 
 	do_sysctl_args();
+	rsi_host_debug(0xcafe0004);
 
 	if (ramdisk_execute_command) {
 		ret = run_init_process(ramdisk_execute_command);
@@ -1575,12 +1637,14 @@ static int __ref kernel_init(void *unused)
 			return 0;
 	}
 
+	rsi_host_debug(0xcafe0002);
 	if (!try_to_run_init_process("/sbin/init") ||
 	    !try_to_run_init_process("/etc/init") ||
 	    !try_to_run_init_process("/bin/init") ||
 	    !try_to_run_init_process("/bin/sh"))
 		return 0;
 
+	rsi_host_debug(0xdeadbeef);
 	panic("No working init found.  Try passing init= option to kernel. "
 	      "See Linux Documentation/admin-guide/init.rst for guidance.");
 }
@@ -1608,22 +1672,29 @@ static noinline void __init kernel_init_freeable(void)
 	/*
 	 * init can allocate pages on any node
 	 */
+	rsi_host_debug(0xbabe000);
 	set_mems_allowed(node_states[N_MEMORY]);
 
 	cad_pid = get_pid(task_pid(current));
 
+	rsi_host_debug(0xbabe001);
 	smp_prepare_cpus(setup_max_cpus);
 
+	rsi_host_debug(0xbabe002);
 	workqueue_init();
 
+	rsi_host_debug(0xbabe003);
 	init_mm_internals();
 
 	rcu_init_tasks_generic();
 	do_pre_smp_initcalls();
 	lockup_detector_init();
 
+	rsi_host_debug(0xbabe004);
 	smp_init();
+	rsi_host_debug(0xbabe005);
 	sched_init_smp();
+	rsi_host_debug(0xbabe006);
 
 	padata_init();
 	page_alloc_init_late();
@@ -1634,9 +1705,12 @@ static noinline void __init kernel_init_freeable(void)
 	do_basic_setup();
 
 	kunit_run_all_tests();
+	rsi_host_debug(0xbabe007);
 
 	wait_for_initramfs();
+	rsi_host_debug(0xbabe008);
 	console_on_rootfs();
+	rsi_host_debug(0xbabe009);
 
 	/*
 	 * check if there is an early userspace init.  If yes, let it do all

@@ -29,6 +29,7 @@
 #include <asm/exception.h>
 #include <asm/smp_plat.h>
 #include <asm/virt.h>
+#include <asm/rsi.h>
 
 #include "irq-gic-common.h"
 
@@ -2076,6 +2077,10 @@ static int __init gic_of_init(struct device_node *node, struct device_node *pare
 	u32 nr_redist_regions;
 	int err, i;
 
+	pr_info("%s\n\n", __func__);
+	rsi_host_debug(1);
+	rsi_host_debug(1);
+
 	dist_base = gic_of_iomap(node, 0, "GICD", &res);
 	if (IS_ERR(dist_base)) {
 		pr_err("%pOF: unable to map gic dist registers\n", node);
@@ -2098,6 +2103,7 @@ static int __init gic_of_init(struct device_node *node, struct device_node *pare
 		goto out_unmap_dist;
 	}
 
+	rsi_host_debug(2);
 	for (i = 0; i < nr_redist_regions; i++) {
 		rdist_regs[i].redist_base = gic_of_iomap(node, 1 + i, "GICR", &res);
 		if (IS_ERR(rdist_regs[i].redist_base)) {
@@ -2107,21 +2113,26 @@ static int __init gic_of_init(struct device_node *node, struct device_node *pare
 		}
 		rdist_regs[i].phys_base = res.start;
 	}
+	rsi_host_debug(3);
 
 	if (of_property_read_u64(node, "redistributor-stride", &redist_stride))
 		redist_stride = 0;
 
 	gic_enable_of_quirks(node, gic_quirks, &gic_data);
 
+	rsi_host_debug(4);
+
 	err = gic_init_bases(dist_base, rdist_regs, nr_redist_regions,
 			     redist_stride, &node->fwnode);
 	if (err)
 		goto out_unmap_rdist;
 
+	rsi_host_debug(5);
 	gic_populate_ppi_partitions(node);
 
 	if (static_branch_likely(&supports_deactivate_key))
 		gic_of_setup_kvm_info(node);
+	rsi_host_debug(6);
 	return 0;
 
 out_unmap_rdist:
@@ -2396,6 +2407,7 @@ gic_acpi_init(union acpi_subtable_headers *header, const unsigned long end)
 	size_t size;
 	int i, err;
 
+	pr_info("%s\n\n", __func__);
 	/* Get distributor base address */
 	dist = (struct acpi_madt_generic_distributor *)header;
 	acpi_data.dist_base = ioremap(dist->base_address,

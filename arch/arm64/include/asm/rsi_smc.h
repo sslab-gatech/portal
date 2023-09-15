@@ -129,4 +129,6 @@ struct realm_config {
  */
 #define SMC_RSI_HOST_CALL			SMC_RSI_FID(0x199)
 
+#define SMC_RSI_HOST_DEBUG			SMC_RSI_FID(0x19a)
+
 #endif /* __SMC_RSI_H_ */
