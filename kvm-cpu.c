@@ -160,6 +160,7 @@ int kvm_cpu__start(struct kvm_cpu *cpu)
 		kvm_cpu__enable_singlestep(cpu);
 
 	while (cpu->is_running) {
+		//printf("KVMTOOL: CPU running..\n");
 		if (cpu->needs_nmi) {
 			kvm_cpu__arch_nmi(cpu);
 			cpu->needs_nmi = 0;
@@ -199,6 +200,7 @@ int kvm_cpu__start(struct kvm_cpu *cpu)
 			 * If we had MMIO exit, coalesced ring should be processed
 			 * *before* processing the exit itself
 			 */
+			//printf("KVM_EXIT_MMIO to user\n");
 			kvm_cpu__handle_coalesced_mmio(cpu);
 
 			ret = kvm_cpu__emulate_mmio(cpu,

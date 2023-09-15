@@ -530,6 +530,7 @@ bool kvm__load_kernel(struct kvm *kvm, const char *kernel_filename,
 
 	ret = kvm__arch_load_kernel_image(kvm, fd_kernel, fd_initrd,
 					  kernel_cmdline);
+	printf("finishing loading kernel including initrd!!!\n");
 
 	if (initrd_filename)
 		close(fd_initrd);

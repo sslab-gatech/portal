@@ -238,12 +238,15 @@ static int setup_fdt(struct kvm *kvm)
 	_FDT(fdt_open_into(fdt, fdt_dest, FDT_MAX_SIZE));
 	_FDT(fdt_pack(fdt_dest));
 
-	if (kvm->cfg.arch.dump_dtb_filename)
+	//kvm->cfg.arch.dump_dtb_filename = "./fdt-gen";
+	if (kvm->cfg.arch.dump_dtb_filename) {
+		printf("Dumping dtb\n");
 		dump_fdt(kvm->cfg.arch.dump_dtb_filename, fdt_dest);
+	}
 
 	if (kvm->cfg.arch.is_realm)
 		kvm_arm_realm_populate_dtb(kvm);
-
+	printf("populating dtb for realm finished\n");
 	return 0;
 }
 late_init(setup_fdt);

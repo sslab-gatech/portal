@@ -405,6 +405,7 @@ static void serial8250_mmio(struct kvm_cpu *vcpu, u64 addr, u8 *data, u32 len,
 {
 	struct serial8250_device *dev = ptr;
 
+	//printf("%s:hanadling %llx\n", __func__, addr);
 	if (is_write)
 		serial8250_out(dev, vcpu, addr - dev->iobase, data);
 	else

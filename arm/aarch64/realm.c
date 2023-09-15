@@ -99,6 +99,7 @@ static void realm_init_ipa_range(struct kvm *kvm, u64 start, u64 size)
 	if (ioctl(kvm->vm_fd, KVM_ENABLE_CAP, &rme_init_ipa_realm) < 0)
 		die("unable to intialise IPA range for Realm %llx - %llx (size %llu)",
 		    start, start + size, size);
+	printf("KVMTOOL:%s (%llx - %llx)\n", __func__, start, start+size);
 
 }
 
@@ -114,6 +115,7 @@ static void __realm_populate(struct kvm *kvm, u64 start, u64 size)
 		.args[1] = (u64)&populate_args
 	};
 
+	printf("KVMTOOL:%s (%llx - %llx)\n", __func__, start, start+size);
 	if (ioctl(kvm->vm_fd, KVM_ENABLE_CAP, &rme_populate_realm) < 0)
 		die("unable to populate Realm memory %llx - %llx (size %llu)",
 		    start, start + size, size);
@@ -154,6 +156,7 @@ void kvm_arm_realm_populate_kernel(struct kvm *kvm)
 	else
 		mem_size = end - start;
 
+	printf("KVMTOOL:%s\n",__func__);
 	realm_init_ipa_range(kvm, start, mem_size);
 	__realm_populate(kvm, start, end - start);
 }
@@ -172,8 +175,10 @@ void kvm_arm_realm_populate_initrd(struct kvm *kvm)
 	if (start < kernel_end)
 		start = kernel_end;
 	end = ALIGN(kvm->arch.initrd_guest_start + kvm->arch.initrd_size, SZ_4K);
-	if (end > start)
+	if (end > start) {
+		printf("KVMTOOL:%s\n", __func__);
 		realm_populate(kvm, start, end - start);
+	}
 }
 
 void kvm_arm_realm_populate_dtb(struct kvm *kvm)
@@ -190,8 +195,10 @@ void kvm_arm_realm_populate_dtb(struct kvm *kvm)
 	if (start < initrd_end)
 		start = initrd_end;
 	end = ALIGN(kvm->arch.dtb_guest_start + FDT_MAX_SIZE, SZ_4K);
-	if (end > start)
+	if (end > start) {
+		printf("KVMTOOL:%s\n", __func__);
 		realm_populate(kvm, start, end - start);
+	}
 }
 
 static void kvm_arm_realm_activate_realm(struct kvm *kvm)

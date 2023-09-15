@@ -136,6 +136,7 @@ void kvm__arch_init(struct kvm *kvm)
 		die("Failed to create virtual GIC");
 
 	kvm__arch_enable_mte(kvm);
+	printf("%s finished well\n", __func__);
 }
 
 #define FDT_ALIGN	SZ_2M
@@ -168,8 +169,10 @@ bool kvm__arch_load_kernel_image(struct kvm *kvm, int fd_kernel, int fd_initrd,
 	pr_debug("Loaded kernel to 0x%llx (%llu bytes)",
 		 kvm->arch.kern_guest_start, kvm->arch.kern_size);
 
-	if (kvm->cfg.arch.is_realm)
+	if (kvm->cfg.arch.is_realm) {
+		printf("KVMTOOL:%s\n", __func__);
 		kvm_arm_realm_populate_kernel(kvm);
+	}
 
 	/*
 	 * Now load backwards from the end of memory so the kernel
@@ -215,8 +218,9 @@ bool kvm__arch_load_kernel_image(struct kvm *kvm, int fd_kernel, int fd_initrd,
 		pr_debug("Loaded initrd to 0x%llx (%llu bytes)",
 			 kvm->arch.initrd_guest_start, kvm->arch.initrd_size);
 
-		if (kvm->cfg.arch.is_realm)
+		if (kvm->cfg.arch.is_realm) {
 			kvm_arm_realm_populate_initrd(kvm);
+		}
 	} else {
 		kvm->arch.initrd_size = 0;
 	}
@@ -289,9 +293,10 @@ bool kvm__load_firmware(struct kvm *kvm, const char *firmware_filename)
 		 kvm->arch.dtb_guest_start,
 		 kvm->arch.dtb_guest_start + FDT_MAX_SIZE);
 
-	if (kvm->cfg.arch.is_realm)
+	if (kvm->cfg.arch.is_realm) {
 		/* We hijack the kernel fields to describe the firmware. */
 		kvm_arm_realm_populate_kernel(kvm);
+	}
 
 	return true;
 }

@@ -47,6 +47,7 @@ static inline bool kvm_cpu__emulate_io(struct kvm_cpu *vcpu, u16 port, void *dat
 static inline bool kvm_cpu__emulate_mmio(struct kvm_cpu *vcpu, u64 phys_addr,
 					 u8 *data, u32 len, u8 is_write)
 {
+	//printf("%s: is_wirte(%d) fault_ipa(%llx)\n" ,__func__, is_write, phys_addr);
 	if (arm_addr_in_ioport_region(phys_addr)) {
 		int direction = is_write ? KVM_EXIT_IO_OUT : KVM_EXIT_IO_IN;
 		u16 port = (phys_addr - KVM_IOPORT_AREA) & USHRT_MAX;
