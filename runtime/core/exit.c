@@ -136,6 +136,8 @@ static bool ipa_is_empty(unsigned long ipa, struct rec *rec)
 		for (ipa = 0x8109c000 - (0x1000 * 100); ipa < 0x8109c000 + (0x1000 * 100); ipa = ipa + 0x1000) {
 			buffer_unmap(ll_table);
 			granule_unlock(wi.g_llt);
+			memset(&wi, 0, sizeof(wi));
+			ll_table = NULL;
 
 			rtt_walk_lock_unlock(rec->realm_info.g_rtt,
 					     rec->realm_info.s2_starting_level,
@@ -144,8 +146,9 @@ static bool ipa_is_empty(unsigned long ipa, struct rec *rec)
 			ll_table = granule_map(wi.g_llt, SLOT_RTT);
 			s2tte = s2tte_read(&ll_table[wi.index]);
 
-			INFO("IPA:%lx s2tt:%lx -> s2tte(LL:%ld):%lx  desc_type:%lx  hipas:%lx  ripas:%lx \n",
-					ipa, (unsigned long)ll_table, wi.last_level, s2tte, s2tte & DESC_TYPE_MASK, s2tte & S2TTE_INVALID_HIPAS_MASK,
+			INFO("IPA:%lx LVL:%ld s2tt:%lx[%ld]-> s2tte:%lx  desc_type:%lx  hipas:%lx  ripas:%lx \n",
+					ipa, wi.last_level, granule_addr(wi.g_llt), wi.index, s2tte, 
+					s2tte & DESC_TYPE_MASK, s2tte & S2TTE_INVALID_HIPAS_MASK,
 					s2tte & S2TTE_INVALID_RIPAS_MASK);
 			buffer_unmap(ll_table);
 			granule_unlock(wi.g_llt);
