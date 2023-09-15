@@ -16,6 +16,7 @@
 #include <string.h>
 #include <table.h>
 #include <vmid.h>
+#include <debug.h>
 
 unsigned long smc_realm_activate(unsigned long rd_addr)
 {
@@ -297,6 +298,11 @@ unsigned long smc_realm_create(unsigned long rd_addr,
 	rd->s2_ctx.ipa_bits = requested_ipa_bits(&p);
 	rd->s2_ctx.s2_starting_level = p.rtt_level_start;
 	rd->s2_ctx.num_root_rtts = p.rtt_num_start;
+
+	INFO("IPA_BITS:%d S2_Starting_level:%d num_root_rtts:%d\n",
+			rd->s2_ctx.ipa_bits, rd->s2_ctx.s2_starting_level,
+			rd->s2_ctx.num_root_rtts);
+
 	(void)memcpy(&rd->rpv[0], &p.rpv[0], RPV_SIZE);
 
 	rd->s2_ctx.vmid = (unsigned int)p.vmid;

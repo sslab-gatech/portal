@@ -31,6 +31,7 @@
 #include <sve.h>
 #include <sysreg_traps.h>
 #include <table.h>
+#include <utils_def.h> 
 
 void save_fpu_state(struct fpu_state *fpu);
 void restore_fpu_state(struct fpu_state *fpu);
@@ -83,6 +84,18 @@ static bool access_in_rec_par(struct rec *rec, unsigned long addr)
 	return addr_in_rec_par(rec, addr);
 }
 
+#define DESC_TYPE_MASK			0x3UL
+#define S2TTE_INVALID_HIPAS_SHIFT	2
+#define S2TTE_INVALID_HIPAS_WIDTH	4
+#define S2TTE_INVALID_HIPAS_MASK	MASK(S2TTE_INVALID_HIPAS)
+
+#define S2TTE_INVALID_HIPAS_UNASSIGNED	(INPLACE(S2TTE_INVALID_HIPAS, 0))
+#define S2TTE_INVALID_HIPAS_ASSIGNED	(INPLACE(S2TTE_INVALID_HIPAS, 1))
+#define S2TTE_INVALID_HIPAS_DESTROYED	(INPLACE(S2TTE_INVALID_HIPAS, 2))
+
+#define S2TTE_INVALID_RIPAS_SHIFT	6
+#define S2TTE_INVALID_RIPAS_WIDTH	1
+#define S2TTE_INVALID_RIPAS_MASK	MASK(S2TTE_INVALID_RIPAS)
 /*
  * Returns 'true' if the @ipa is in PAR and its RIPAS is 'empty'.
  *
@@ -98,6 +111,7 @@ static bool ipa_is_empty(unsigned long ipa, struct rec *rec)
 	assert(GRANULE_ALIGNED(ipa));
 
 	if (!addr_in_rec_par(rec, ipa)) {
+		INFO("address is not in PAR!!!\n");
 		return false;
 	}
 	granule_lock(rec->realm_info.g_rtt, GRANULE_STATE_RTT);
@@ -111,11 +125,32 @@ static bool ipa_is_empty(unsigned long ipa, struct rec *rec)
 	s2tte = s2tte_read(&ll_table[wi.index]);
 
 	if (s2tte_is_destroyed(s2tte)) {
+		INFO("destroyed address!!\n");
 		ret = false;
 		goto out_unmap_ll_table;
 	}
 	ripas = s2tte_get_ripas(s2tte);
 	ret = (ripas == RIPAS_EMPTY);
+
+	if (ipa == 0x8109c000) {
+		for (ipa = 0x8109c000 - (0x1000 * 100); ipa < 0x8109c000 + (0x1000 * 100); ipa = ipa + 0x1000) {
+			buffer_unmap(ll_table);
+			granule_unlock(wi.g_llt);
+
+			rtt_walk_lock_unlock(rec->realm_info.g_rtt,
+					     rec->realm_info.s2_starting_level,
+					     rec->realm_info.ipa_bits,
+					     ipa, RTT_PAGE_LEVEL, &wi);
+			ll_table = granule_map(wi.g_llt, SLOT_RTT);
+			s2tte = s2tte_read(&ll_table[wi.index]);
+
+			INFO("IPA:%lx s2tt:%lx -> s2tte(LL:%ld):%lx  desc_type:%lx  hipas:%lx  ripas:%lx \n",
+					ipa, (unsigned long)ll_table, wi.last_level, s2tte, s2tte & DESC_TYPE_MASK, s2tte & S2TTE_INVALID_HIPAS_MASK,
+					s2tte & S2TTE_INVALID_RIPAS_MASK);
+			buffer_unmap(ll_table);
+			granule_unlock(wi.g_llt);
+		}
+	}
 
 out_unmap_ll_table:
 	buffer_unmap(ll_table);
@@ -227,6 +262,7 @@ static bool handle_data_abort(struct rec *rec, struct rmi_rec_exit *rec_exit,
 	unsigned long write_val = 0UL;
 
 	if (handle_sync_external_abort(rec, rec_exit, esr)) {
+		INFO("SEEMS THAT NEVER HAPPEN\n");
 		/*
 		 * All external aborts are immediately reported to the host.
 		 */
@@ -239,10 +275,12 @@ static bool handle_data_abort(struct rec *rec, struct rmi_rec_exit *rec_exit,
 	 *
 	 * Insert the SEA and return to the Realm if the granule's RIPAS is EMPTY.
 	 */
+#if 1
 	if (ipa_is_empty(fipa, rec)) {
 		inject_sync_idabort(ESR_EL2_ABORT_FSC_SEA);
 		return true;
 	}
+#endif 
 
 	if (fixup_aarch32_data_abort(rec, &esr) ||
 	    access_in_rec_par(rec, fipa)) {
@@ -527,6 +565,10 @@ static bool handle_realm_rsi(struct rec *rec, struct rmi_rec_exit *rec_exit)
 		}
 		break;
 	}
+	case SMC_RSI_HOST_DEBUG: {
+		INFO("SMC_RSI_HOST_DEBUG:%ld\n", (rec->regs[1]));
+		break; 
+	}
 	default:
 		rec->regs[0] = SMC_UNKNOWN;
 		break;
@@ -626,10 +668,11 @@ static bool handle_exception_sync(struct rec *rec, struct rmi_rec_exit *rec_exit
 		 * TODO: Check if there are other exit reasons we could
 		 * encounter here and handle them appropriately
 		 */
+		INFO("THIS is not handled!!!\n");
 		break;
 	}
 
-	VERBOSE("Unhandled sync exit ESR: %08lx (EC: %lx ISS: %lx)\n",
+	INFO("Unhandled sync exit ESR: %08lx (EC: %lx ISS: %lx)\n",
 		esr, EXTRACT(ESR_EL2_EC, esr), EXTRACT(ESR_EL2_ISS, esr));
 
 	/*

@@ -281,7 +281,6 @@ void rec_run_loop(struct rec *rec, struct rmi_rec_exit *rec_exit)
 	int realm_exception_code;
 	void *rec_aux;
 	unsigned int cpuid = my_cpuid();
-	uint64_t fault_ipa = 0;
 
 	assert(cpuid < MAX_CPUS);
 	assert(rec->ns == NULL);
@@ -343,17 +342,18 @@ void rec_run_loop(struct rec *rec, struct rmi_rec_exit *rec_exit)
 
 		activate_events(rec);
 
-#if 1
-		INFO("[ENTER]: Jumping into %lx\t", read_elr_el2());
+#if 0
+		INFO("[ENTER]: %lx\t", read_elr_el2());
 #endif 
 		realm_exception_code = run_realm(&rec->regs[0]);
 
+#if 0
+		uint64_t fault_ipa = 0;
 		fault_ipa = (read_hpfar_el2() & (~UL(0xf))) << 8;
 		fault_ipa |= read_far_el2() & ((1 << 12) - 1);
-#if 1
-		INFO("[EXIT]: Exception_code:%d ELR_EL2:%lx far:%lx hpfar:%lx fault_ipa:%lx\n",
+		INFO("[EXIT]: Exception_code:%d ELR_EL2:%lx far:%lx hpfar:%lx fault_ipa:%lx Exception_reason(ESR):%lx \n",
 			       	realm_exception_code, read_elr_el2(), read_far_el2(), 
-				read_hpfar_el2(), fault_ipa);
+				read_hpfar_el2(), fault_ipa, (read_esr_el2() & MASK(ESR_EL2_EC)));
 #endif 
 	} while (handle_realm_exit(rec, rec_exit, realm_exception_code));
 

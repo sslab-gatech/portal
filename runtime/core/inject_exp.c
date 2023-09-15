@@ -8,6 +8,7 @@
 #include <assert.h>
 #include <inject_exp.h>
 #include <rec.h>
+#include <debug.h>
 
 /*
  * Calculate the address of the vector entry when an exception is inserted
@@ -124,8 +125,11 @@ void inject_sync_idabort(unsigned long fsc)
 	unsigned long pc = calc_vector_entry(vbar_el2, spsr_el2);
 	unsigned long pstate = calc_pstate();
 
-	write_far_el12(far_el2);
-	write_elr_el12(elr_el2);
+
+	INFO("Injecting abort %lx: far_el2:%lx elr_el2:%lx spsr_el2:%lx esr_el1:%lx next_pc:%lx pstate:%lx \n",
+		       	fsc, far_el2, elr_el2, spsr_el2, esr_el1, pc, pstate);
+	write_far_el12(far_el2); //faulting virtual address to guest
+	write_elr_el12(elr_el2); //return address to guest
 	write_spsr_el12(spsr_el2);
 	write_esr_el12(esr_el1);
 	write_elr_el2(pc);

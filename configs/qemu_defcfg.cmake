@@ -23,8 +23,8 @@ arm_config_option_override(NAME RMM_MAX_SIZE DEFAULT 0x01000000)
 # UART Base address. This must be dynamically discovered in future.
 # Use UART3 on the FVP for RMM.
 #
-#arm_config_option_override(NAME RMM_UART_ADDR DEFAULT 0x090c0000) //dedicated console
-arm_config_option_override(NAME RMM_UART_ADDR DEFAULT 0x09000000)
+arm_config_option_override(NAME RMM_UART_ADDR DEFAULT 0x090c0000) 
+#arm_config_option_override(NAME RMM_UART_ADDR DEFAULT 0x09000000) combine console
 
 #
 # Extra memory regions needed by this platform

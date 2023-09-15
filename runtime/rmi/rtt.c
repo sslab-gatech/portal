@@ -15,6 +15,7 @@
 #include <stddef.h>
 #include <string.h>
 #include <table.h>
+#include <debug.h>
 
 /*
  * Validate the map_addr value passed to RMI_RTT_* and RMI_DATA_* commands.
@@ -78,9 +79,12 @@ static bool validate_rtt_entry_cmds(unsigned long map_addr,
 	return validate_map_addr(map_addr, level, rd);
 }
 
-unsigned long smc_rtt_create(unsigned long rtt_addr,
+//At the end we want to map map_addr but there is no corresponding rtt
+//rtt_create generates rtt mapping for map_addr at ulevel. map_addr is 
+//necessary to walk s2tt to get its parent page tables
+unsigned long smc_rtt_create(unsigned long rtt_addr, //host provided address that can be used as rtt table!
 			     unsigned long rd_addr,
-			     unsigned long map_addr,
+			     unsigned long map_addr, //IPA address of guest that should be mapped in RTT
 			     unsigned long ulevel)
 {
 	struct granule *g_rd;
@@ -128,9 +132,12 @@ unsigned long smc_rtt_create(unsigned long rtt_addr,
 	/* Unlock RD after locking RTT Root */
 	granule_unlock(g_rd);
 
+	INFO("Start Level:%d Target Level:%ld\n", sl, level);
 	rtt_walk_lock_unlock(g_table_root, sl, ipa_bits,
 				map_addr, level - 1L, &wi);
 	if (wi.last_level != level - 1L) {
+		INFO("UPPER level RTT should be generated\n");
+		//check why it works with 3level at first :*
 		ret = pack_return_code(RMI_ERROR_RTT, wi.last_level);
 		goto out_unlock_llt;
 	}
@@ -140,6 +147,7 @@ unsigned long smc_rtt_create(unsigned long rtt_addr,
 	s2tt = granule_map(g_tbl, SLOT_DELEGATED);
 
 	if (s2tte_is_unassigned(parent_s2tte)) {
+		INFO("s2tte_is_unassigned\n");
 		/*
 		 * Note that if map_addr is an Unprotected IPA, the RIPAS field
 		 * is guaranteed to be zero, in both parent and child s2ttes.
@@ -157,12 +165,14 @@ unsigned long smc_rtt_create(unsigned long rtt_addr,
 		__granule_get(wi.g_llt);
 
 	} else if (s2tte_is_destroyed(parent_s2tte)) {
+		INFO("s2tte_is_destroyed\n");
 		s2tt_init_destroyed(s2tt);
 		__granule_get(wi.g_llt);
 
 	} else if (s2tte_is_assigned(parent_s2tte, level - 1L)) {
 		unsigned long block_pa;
 
+		INFO("s2tte_is_assigned\n");
 		/*
 		 * We should observe parent assigned s2tte only when
 		 * we create tables above this level.
@@ -181,6 +191,7 @@ unsigned long smc_rtt_create(unsigned long rtt_addr,
 
 	} else if (s2tte_is_valid(parent_s2tte, level - 1L)) {
 		unsigned long block_pa;
+		INFO("s2tte_is_valid\n");
 
 		/*
 		 * We should observe parent valid s2tte only when
@@ -206,6 +217,7 @@ unsigned long smc_rtt_create(unsigned long rtt_addr,
 
 	} else if (s2tte_is_valid_ns(parent_s2tte, level - 1L)) {
 		unsigned long block_pa;
+		INFO("s2tte_is_valid_ns\n");
 
 		/*
 		 * We should observe parent valid_ns s2tte only when
@@ -230,6 +242,7 @@ unsigned long smc_rtt_create(unsigned long rtt_addr,
 		__granule_refcount_inc(g_tbl, S2TTES_PER_S2TT);
 
 	} else if (s2tte_is_table(parent_s2tte, level - 1L)) {
+		INFO("s2tte_is_table\n");
 		ret = pack_return_code(RMI_ERROR_RTT,
 					(unsigned int)(level - 1L));
 		goto out_unmap_table;
@@ -1272,6 +1285,8 @@ unsigned long smc_rtt_set_ripas(unsigned long rd_addr,
 	}
 
 	s2tte_write(&s2tt[wi.index], s2tte);
+
+	s2tte = s2tte_read(&s2tt[wi.index]);
 
 	if (valid && (ripas == RIPAS_EMPTY)) {
 		if (level == RTT_PAGE_LEVEL) {

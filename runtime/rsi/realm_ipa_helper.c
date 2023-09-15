@@ -6,6 +6,7 @@
 #include <buffer.h>
 #include <granule.h>
 #include <realm.h>
+#include <debug.h>
 
 /**
  * Translate a realm granule IPA to PA.
@@ -40,6 +41,8 @@ enum s2_walk_status realm_ipa_to_pa(struct rd *rd,
 	if (!GRANULE_ALIGNED(ipa) || !addr_in_par(rd, ipa)) {
 		return WALK_INVALID_PARAMS;
 	}
+
+	INFO("%s\n\n\n", __func__);
 
 	/*
 	 * SW table walk to find corresponding PA. It handles cases when buffer
@@ -115,6 +118,7 @@ enum s2_walk_status realm_ipa_get_ripas(struct rec *rec, unsigned long ipa,
 	struct rtt_walk wi;
 	enum s2_walk_status ws;
 
+	INFO("%s\n\n\n", __func__);
 	assert(ripas_ptr != NULL);
 	assert(rtt_level != NULL);
 	assert(GRANULE_ALIGNED(ipa));

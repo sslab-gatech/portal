@@ -165,4 +165,8 @@ struct rsi_host_call {
  */
 #define SMC_RSI_HOST_CALL		SMC64_RSI_FID(U(0x9))
 
+
+
+#define SMC_RSI_HOST_DEBUG 		SMC64_RSI_FID(U(0xa))
+
 #endif /* SMC_RSI_H */
