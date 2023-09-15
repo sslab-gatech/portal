@@ -800,7 +800,6 @@ int vgic_register_redist_iodev(struct kvm_vcpu *vcpu)
 	rd_dev->redist_vcpu = vcpu;
 
 	mutex_lock(&kvm->slots_lock);
-	printk("%s\n", __func__);
 	ret = kvm_io_bus_register_dev(kvm, KVM_MMIO_BUS, rd_base,
 				      2 * SZ_64K, &rd_dev->dev);
 	mutex_unlock(&kvm->slots_lock);

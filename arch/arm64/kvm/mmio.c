@@ -190,7 +190,7 @@ int io_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa)
 
 	if (!ret) {
 		/* We handled the access successfully in the kernel. */
-		printk("MMIO Handled in kernel, no user exit!\n");
+		//printk("MMIO Handled in kernel, no user exit!\n");
 		if (!is_write)
 			memcpy(run->mmio.data, data_buf, len);
 		vcpu->stat.mmio_exit_kernel++;
