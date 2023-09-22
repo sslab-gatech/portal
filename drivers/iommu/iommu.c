@@ -2199,10 +2199,12 @@ static int __iommu_group_set_domain(struct iommu_group *group,
 	 * Note that this is called in error unwind paths, attaching to a
 	 * domain that has already been attached cannot fail.
 	 */
+	//This function iterates all devices in the current group and attach them to new domain
 	ret = __iommu_group_for_each_dev(group, new_domain,
 					 iommu_group_do_attach_device);
 	if (ret)
 		return ret;
+	//after setting up the new domain by registering all devs to the new blocking domain, change it!
 	group->domain = new_domain;
 	return 0;
 }

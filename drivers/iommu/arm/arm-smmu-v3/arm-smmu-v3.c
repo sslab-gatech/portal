@@ -2106,7 +2106,9 @@ static int arm_smmu_domain_finalise_s1(struct arm_smmu_domain *smmu_domain,
 
 	smmu_domain->stall_enabled = master->stall_enabled;
 
+	printk("allocate CD table\n");
 	ret = arm_smmu_alloc_cd_tables(smmu_domain);
+	printk("allocate CD table\n");
 	if (ret)
 		goto out_free_asid;
 
@@ -2269,6 +2271,7 @@ static void arm_smmu_install_ste_for_dev(struct arm_smmu_master *master)
 	printk("install ste for dev! num_streams:%d\n", master->num_streams);
 	for (i = 0; i < master->num_streams; ++i) {
 		u32 sid = master->streams[i].id;
+		printk("Stream ID: %d\n", sid);
 		__le64 *step = arm_smmu_get_step_for_sid(smmu, sid);
 
 		/* Bridged PCI devices may end up with duplicated IDs */
@@ -2399,7 +2402,7 @@ static void arm_smmu_detach_dev(struct arm_smmu_master *master)
 
 	master->domain = NULL;
 	master->ats_enabled = false;
-	arm_smmu_install_ste_for_dev(master);
+	arm_smmu_install_ste_for_dev(master); //seems that it updates ste for dev.. and previous lines are set for ste..
 }
 
 static int arm_smmu_attach_dev(struct iommu_domain *domain, struct device *dev)
@@ -2417,7 +2420,6 @@ static int arm_smmu_attach_dev(struct iommu_domain *domain, struct device *dev)
 	master = dev_iommu_priv_get(dev);
 	smmu = master->smmu;
 
-	dev_info(dev, "attaching new device!\n");
 	/*
 	 * Checking that SVA is disabled ensures that this device isn't bound to
 	 * any mm, and can be safely detached from its old domain. Bonds cannot

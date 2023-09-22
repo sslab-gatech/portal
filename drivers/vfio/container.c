@@ -306,6 +306,7 @@ static long vfio_ioctl_set_iommu(struct vfio_container *container,
 			continue;
 		}
 
+		printk("open ! iommu_drivers of vfio\n");
 		data = driver->ops->open(arg);
 		if (IS_ERR(data)) {
 			ret = PTR_ERR(data);
@@ -446,7 +447,9 @@ int vfio_container_attach_group(struct vfio_container *container,
 	}
 
 	if (group->type == VFIO_IOMMU) {
-		ret = iommu_group_claim_dma_owner(group->iommu_group, group);
+		ret = iommu_group_claim_dma_owner(group->iommu_group, group); 
+		//now the iommu_group.owner => group
+		//Also the domain of the iommu_group is newly created where the devices in the group are attached to
 		if (ret)
 			goto out_unlock_container;
 	}
@@ -464,7 +467,7 @@ int vfio_container_attach_group(struct vfio_container *container,
 		}
 	}
 
-	group->container = container;
+	group->container = container; //make the group member filed container points to container!
 	group->container_users = 1;
 	container->noiommu = (group->type == VFIO_NO_IOMMU);
 	list_add(&group->container_next, &container->group_list);
