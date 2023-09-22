@@ -278,12 +278,10 @@ static bool handle_data_abort(struct rec *rec, struct rmi_rec_exit *rec_exit,
 	 *
 	 * Insert the SEA and return to the Realm if the granule's RIPAS is EMPTY.
 	 */
-#if 1
 	if (ipa_is_empty(fipa, rec)) {
 		inject_sync_idabort(ESR_EL2_ABORT_FSC_SEA);
 		return true;
 	}
-#endif 
 
 	if (fixup_aarch32_data_abort(rec, &esr) ||
 	    access_in_rec_par(rec, fipa)) {
