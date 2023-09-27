@@ -1,0 +1,1677 @@
+## PCI Init (core PCI driver registration)
+```cpp
+static int __init pci_driver_init(void)
+{
+        int ret;
+
+        ret = bus_register(&pci_bus_type);
+        if (ret)
+                return ret;
+
+#ifdef CONFIG_PCIEPORTBUS
+        ret = bus_register(&pcie_port_bus_type);
+        if (ret)
+                return ret;
+#endif
+        dma_debug_add_bus(&pci_bus_type);
+        return 0;
+}
+postcore_initcall(pci_driver_init);
+
+struct bus_type pci_bus_type = {
+        .name           = "pci",
+        .match          = pci_bus_match,
+        .uevent         = pci_uevent,
+        .probe          = pci_device_probe,
+        .remove         = pci_device_remove,
+        .shutdown       = pci_device_shutdown,
+        .dev_groups     = pci_dev_groups,
+        .bus_groups     = pci_bus_groups,
+        .drv_groups     = pci_drv_groups,
+        .pm             = PCI_PM_OPS_PTR,
+        .num_vf         = pci_bus_num_vf,
+        .dma_configure  = pci_dma_configure,
+        .dma_cleanup    = pci_dma_cleanup,
+};      
+EXPORT_SYMBOL(pci_bus_type);
+```
+
+Two important functions of pci bus device is probe and match. When new device is 
+attached to the pci bus, then it invokes the match function to configure if the 
+new device can be handled one of the registered device driver for pci. When it 
+turns out that the new device can be handled, it invokes pci_device_probe to 
+configure the device. 
+
+
+
+## PCI platform device initialization and registration from DTB
+```cpp
+static const struct of_device_id gen_pci_of_match[] = {
+        { .compatible = "pci-host-cam-generic",
+          .data = &gen_pci_cfg_cam_bus_ops },
+
+        { .compatible = "pci-host-ecam-generic",
+          .data = &pci_generic_ecam_ops },
+
+        { .compatible = "marvell,armada8k-pcie-ecam",
+          .data = &pci_dw_ecam_bus_ops },
+
+        { .compatible = "socionext,synquacer-pcie-ecam",
+          .data = &pci_dw_ecam_bus_ops },
+
+        { .compatible = "snps,dw-pcie-ecam",
+          .data = &pci_dw_ecam_bus_ops },
+
+        { },
+};
+MODULE_DEVICE_TABLE(of, gen_pci_of_match);
+
+static struct platform_driver gen_pci_driver = {
+        .driver = {
+                .name = "pci-host-generic",
+                .of_match_table = gen_pci_of_match,
+        },
+        .probe = pci_host_common_probe,
+        .remove = pci_host_common_remove,
+};
+module_platform_driver(gen_pci_driver);
+```
+
+```cpp
+/* ECAM ops */  
+const struct pci_ecam_ops pci_generic_ecam_ops = {
+        .pci_ops        = {     
+                .add_bus        = pci_ecam_add_bus,
+                .remove_bus     = pci_ecam_remove_bus,
+                .map_bus        = pci_ecam_map_bus,
+                .read           = pci_generic_config_read,
+                .write          = pci_generic_config_write,
+        } 
+};
+
+int pci_host_common_probe(struct platform_device *pdev)
+{
+        struct device *dev = &pdev->dev;
+        struct pci_host_bridge *bridge;
+        struct pci_config_window *cfg;
+        const struct pci_ecam_ops *ops;
+
+        ops = of_device_get_match_data(&pdev->dev);
+        if (!ops)
+                return -ENODEV;
+
+        bridge = devm_pci_alloc_host_bridge(dev, 0);
+        if (!bridge)
+                return -ENOMEM;
+
+        platform_set_drvdata(pdev, bridge);
+
+        of_pci_check_probe_only();
+
+        /* Parse and map our Configuration Space windows */
+        cfg = gen_pci_init(dev, bridge, ops);
+        if (IS_ERR(cfg))
+                return PTR_ERR(cfg);
+
+        /* Do not reassign resources if probe only */
+        if (!pci_has_flag(PCI_PROBE_ONLY))
+                pci_add_flags(PCI_REASSIGN_ALL_BUS);
+
+        bridge->sysdata = cfg;
+        bridge->ops = (struct pci_ops *)&ops->pci_ops;
+        bridge->msi_domain = true;
+
+        return pci_host_probe(bridge);
+}
+```
+As the target platform has pci-host-ecam-generic pci device, the associated ops
+of the device will be pci_generic_ecam_ops. Note that it is passed to 
+gen_pci_init and set ops of the bridge. 
+
+### Allocate and initialize pci bridge 
+```cpp
+struct pci_host_bridge *devm_pci_alloc_host_bridge(struct device *dev,
+                                                   size_t priv)
+{       
+        int ret;
+        struct pci_host_bridge *bridge;
+        
+        bridge = pci_alloc_host_bridge(priv);
+        if (!bridge)
+                return NULL;
+        
+        bridge->dev.parent = dev;
+        
+        ret = devm_add_action_or_reset(dev, devm_pci_alloc_host_bridge_release,
+                                       bridge);
+        if (ret)
+                return NULL;
+        
+        ret = devm_of_pci_bridge_init(dev, bridge);
+        if (ret)
+                return NULL;
+        
+        return bridge;
+	}
+
+int devm_of_pci_bridge_init(struct device *dev, struct pci_host_bridge *bridge)
+{       
+        if (!dev->of_node)             
+                return 0;
+                
+        bridge->swizzle_irq = pci_common_swizzle;
+        bridge->map_irq = of_irq_parse_and_map_pci;
+        
+        return pci_parse_request_of_pci_ranges(dev, bridge);
+}       
+```
+
+
+### Parse PCI bridge node from DTB
+```cpp
+static int pci_parse_request_of_pci_ranges(struct device *dev,
+                                           struct pci_host_bridge *bridge)
+{
+        int err, res_valid = 0;
+        resource_size_t iobase;
+        struct resource_entry *win, *tmp; 
+
+        INIT_LIST_HEAD(&bridge->windows);
+        INIT_LIST_HEAD(&bridge->dma_ranges);
+        
+        err = devm_of_pci_get_host_bridge_resources(dev, 0, 0xff, &bridge->windows,
+                                                    &bridge->dma_ranges, &iobase);
+        if (err)
+                return err;
+                
+        err = devm_request_pci_bus_resources(dev, &bridge->windows);
+        if (err)        
+                return err;
+                        
+        resource_list_for_each_entry_safe(win, tmp, &bridge->windows) {
+                struct resource *res = win->res;
+                        
+                switch (resource_type(res)) {
+                case IORESOURCE_IO:
+                        err = devm_pci_remap_iospace(dev, res, iobase);
+                        if (err) {
+                                dev_warn(dev, "error %d: failed to map resource %pR\n",
+                                         err, res);
+                                resource_list_destroy_entry(win);
+                        }
+                        break;
+                case IORESOURCE_MEM:
+                        res_valid |= !(res->flags & IORESOURCE_PREFETCH);
+                        
+                        if (!(res->flags & IORESOURCE_PREFETCH))
+                                if (upper_32_bits(resource_size(res)))
+                                        dev_warn(dev, "Memory resource size exceeds max for 32 bits\n");
+                        
+                        break;
+                }
+        }
+        
+        if (!res_valid)
+                dev_warn(dev, "non-prefetchable memory resource required\n");
+        
+        return 0;
+}
+```
+
+
+### Parse PCI range 
+**devm_of_pci_get_host_bridge_resources** parses bus ranges described in the 
+device file. In the DTB, under one PCI item, there could be multiple devices 
+attached to it. The info of those devices are described in the ranges field of 
+the pci. The above func mainly parses those bus ranges and translate them into 
+resources, which help further device identification and MMIO establishment. 
+bridge->windows conveys all resources connected to the bridge. Note that the 
+bridge is the pci item in the dtb. In summary, each range describes pci address,
+CPU address, PCI size. To better understanding of PCI in dtb refer to 
+https://michael2012z.medium.com/understanding-pci-node-in-fdt-769a894a13cc.
+
+```cpp
+struct of_pci_range {
+        union {
+                u64 pci_addr;
+                u64 bus_addr;
+        };      
+        u64 cpu_addr;
+        u64 size;
+        u32 flags;       
+};      
+```
+Each parsed range is described by the of_pci_range struct. 
+
+
+```cpp
+                err = of_pci_range_to_resource(&range, dev_node, &tmp_res);
+                if (err)
+                        continue;
+                
+                res = devm_kmemdup(dev, &tmp_res, sizeof(tmp_res), GFP_KERNEL);
+		......
+                pci_add_resource_offset(resources, res, res->start - range.pci_addr);
+
+```
+
+The parsed information is translated into resource by of_pci_range_to_resource.
+Also the generated resource is added into the resources which is the bridge->
+windows.
+
+```cpp
+struct pci_host_bridge {
+        struct device   dev;
+        struct pci_bus  *bus;           /* Root bus */
+        struct pci_ops  *ops;
+        struct pci_ops  *child_ops;
+        void            *sysdata;
+        int             busnr;
+        int             domain_nr;
+        struct list_head windows;       /* resource_entry */
+        struct list_head dma_ranges;    /* dma ranges resource list */
+        u8 (*swizzle_irq)(struct pci_dev *, u8 *); /* Platform IRQ swizzler */
+        int (*map_irq)(const struct pci_dev *, u8, u8);
+        void (*release_fn)(struct pci_host_bridge *);
+        void            *release_data;
+        unsigned int    ignore_reset_delay:1;   /* For entire hierarchy */
+        unsigned int    no_ext_tags:1;          /* No Extended Tags */
+        unsigned int    native_aer:1;           /* OS may use PCIe AER */
+        unsigned int    native_pcie_hotplug:1;  /* OS may use PCIe hotplug */
+        unsigned int    native_shpc_hotplug:1;  /* OS may use SHPC hotplug */
+        unsigned int    native_pme:1;           /* OS may use PCIe PME */
+        unsigned int    native_ltr:1;           /* OS may use PCIe LTR */
+        unsigned int    native_dpc:1;           /* OS may use PCIe DPC */
+        unsigned int    preserve_config:1;      /* Preserve FW resource setup */
+        unsigned int    size_windows:1;         /* Enable root bus sizing */
+        unsigned int    msi_domain:1;           /* Bridge wants MSI domain */
+
+        /* Resource alignment requirements */
+        resource_size_t (*align_resource)(struct pci_dev *dev,
+                        const struct resource *res,
+                        resource_size_t start,
+                        resource_size_t size,
+                        resource_size_t align);
+        unsigned long   private[] ____cacheline_aligned;
+};
+```
+
+### Allocate device resource for parsed PCI ranges
+**devm_request_pci_bus_resources**. The second parameter of this function is the
+bridge->windows which provides information of the PCIE ranges attached to the 
+bridge. The role of this function is to generate device resource for each pci 
+range and add them to the bridge. 
+
+```cpp
+struct resource ioport_resource = {
+        .name   = "PCI IO",
+        .start  = 0,
+        .end    = IO_SPACE_LIMIT,
+        .flags  = IORESOURCE_IO,
+};
+EXPORT_SYMBOL(ioport_resource);
+
+struct resource iomem_resource = {
+        .name   = "PCI mem",
+        .start  = 0,
+        .end    = -1,
+        .flags  = IORESOURCE_MEM,
+};
+EXPORT_SYMBOL(iomem_resource);
+
+int devm_request_pci_bus_resources(struct device *dev,
+                                   struct list_head *resources)
+{
+        struct resource_entry *win;
+        struct resource *parent, *res;
+        int err;
+
+        resource_list_for_each_entry(win, resources) {
+                res = win->res;
+                switch (resource_type(res)) {
+                case IORESOURCE_IO:
+                        parent = &ioport_resource;
+                        break;
+                case IORESOURCE_MEM:
+                        parent = &iomem_resource;
+                        break; 
+                default:
+                        continue;
+                } 
+        
+                err = devm_request_resource(dev, parent, res);
+                if (err)
+                        return err;
+        }
+
+        return 0;
+}       
+
+int devm_request_resource(struct device *dev, struct resource *root,
+                          struct resource *new)
+{
+        struct resource *conflict, **ptr; 
+
+        ptr = devres_alloc(devm_resource_release, sizeof(*ptr), GFP_KERNEL);
+        if (!ptr)
+                return -ENOMEM;
+
+        *ptr = new;
+                
+        conflict = request_resource_conflict(root, new);
+        if (conflict) {
+                dev_err(dev, "resource collision: %pR conflicts with %s %pR\n",
+                        new, conflict->name, conflict);
+                devres_free(ptr);
+                return -EBUSY; 
+        }               
+                
+        devres_add(dev, ptr);
+        return 0;
+}
+```
+
+
+###
+```cpp
+        resource_list_for_each_entry_safe(win, tmp, &bridge->windows) {
+                struct resource *res = win->res;
+
+                switch (resource_type(res)) {
+                case IORESOURCE_IO:
+                        err = devm_pci_remap_iospace(dev, res, iobase);
+                        if (err) {
+                                dev_warn(dev, "error %d: failed to map resource %pR\n",
+                                         err, res);
+                                resource_list_destroy_entry(win);
+                        }       
+                        break;
+                case IORESOURCE_MEM:
+                        res_valid |= !(res->flags & IORESOURCE_PREFETCH);
+
+                        if (!(res->flags & IORESOURCE_PREFETCH))
+                                if (upper_32_bits(resource_size(res)))
+                                        dev_warn(dev, "Memory resource size exceeds max for 32 bits\n");
+
+                        break;
+                }
+        }
+```
+
+
+The parsing for the pci bridge is finished. 
+
+
+
+
+
+
+## GEN_PCI_INIT
+
+```cpp
+static struct pci_config_window *gen_pci_init(struct device *dev,
+                struct pci_host_bridge *bridge, const struct pci_ecam_ops *ops)
+{       
+        int err;
+        struct resource cfgres;         
+        struct resource_entry *bus;
+        struct pci_config_window *cfg;
+
+        err = of_address_to_resource(dev->of_node, 0, &cfgres);
+        if (err) {
+                dev_err(dev, "missing \"reg\" property\n");
+                return ERR_PTR(err);
+        }
+        
+        bus = resource_list_first_type(&bridge->windows, IORESOURCE_BUS);
+        if (!bus)
+                return ERR_PTR(-ENODEV);
+                
+        cfg = pci_ecam_create(dev, &cfgres, bus->res, ops);
+        if (IS_ERR(cfg))
+                return cfg;
+                
+        err = devm_add_action_or_reset(dev, gen_pci_unmap_cfg, cfg);
+        if (err)
+                return ERR_PTR(err);
+        
+        return cfg;
+}       
+```
+**outout**
+```cpp
+/*      
+ * struct to hold the mappings of a config space window. This
+ * is expected to be used as sysdata for PCI controllers that
+ * use ECAM.
+ */             
+struct pci_config_window {
+        struct resource                 res;
+        struct resource                 busr;
+        unsigned int                    bus_shift;
+        void                            *priv;
+        const struct pci_ecam_ops       *ops;
+        union {
+                void __iomem            *win;   /* 64-bit single mapping */
+                void __iomem            **winp; /* 32-bit per-bus mapping */
+        };
+        struct device                   *parent;/* ECAM res was from this dev */
+};      
+```
+
+The main function retrieves the register values from the dtb first through 
+of_address_to_resource function. The register value of the PCI bridge denotes 
+the address range utilized by the PCI devices connected to the present bridge.
+Note that this range is accessible from the CPU.
+
+### Create ECAM for pci
+```cpp
+struct pci_config_window *pci_ecam_create(struct device *dev,
+                struct resource *cfgres, struct resource *busr,
+                const struct pci_ecam_ops *ops)
+{
+        unsigned int bus_shift = ops->bus_shift;
+        struct pci_config_window *cfg;
+        unsigned int bus_range, bus_range_max, bsz;
+        struct resource *conflict;
+        int err;
+
+        if (busr->start > busr->end)
+                return ERR_PTR(-EINVAL);
+
+        cfg = kzalloc(sizeof(*cfg), GFP_KERNEL);
+        if (!cfg)
+                return ERR_PTR(-ENOMEM);
+
+        /* ECAM-compliant platforms need not supply ops->bus_shift */
+        if (!bus_shift)
+                bus_shift = PCIE_ECAM_BUS_SHIFT;
+
+        cfg->parent = dev;
+        cfg->ops = ops;
+        cfg->busr.start = busr->start;
+        cfg->busr.end = busr->end;
+        cfg->busr.flags = IORESOURCE_BUS;
+        cfg->bus_shift = bus_shift;
+        bus_range = resource_size(&cfg->busr);
+        bus_range_max = resource_size(cfgres) >> bus_shift;
+        if (bus_range > bus_range_max) {
+                bus_range = bus_range_max;
+                cfg->busr.end = busr->start + bus_range - 1;
+                dev_warn(dev, "ECAM area %pR can only accommodate %pR (reduced from %pR desired)\n",
+                         cfgres, &cfg->busr, busr);
+        }
+        bsz = 1 << bus_shift;
+
+        cfg->res.start = cfgres->start;
+        cfg->res.end = cfgres->end;
+        cfg->res.flags = IORESOURCE_MEM | IORESOURCE_BUSY;
+        cfg->res.name = "PCI ECAM";
+
+        conflict = request_resource_conflict(&iomem_resource, &cfg->res);
+        if (conflict) {
+                err = -EBUSY;
+                dev_err(dev, "can't claim ECAM area %pR: address conflict with %s %pR\n",
+                        &cfg->res, conflict->name, conflict);
+                goto err_exit;
+        }
+
+        if (per_bus_mapping) {
+                cfg->winp = kcalloc(bus_range, sizeof(*cfg->winp), GFP_KERNEL);
+                if (!cfg->winp)
+                        goto err_exit_malloc;
+        } else {
+                cfg->win = pci_remap_cfgspace(cfgres->start, bus_range * bsz);
+                if (!cfg->win)
+                        goto err_exit_iomap;
+        }
+
+        if (ops->init) {
+                err = ops->init(cfg);
+                if (err)
+                        goto err_exit;
+        }
+        dev_info(dev, "ECAM at %pR for %pR\n", &cfg->res, &cfg->busr);
+        return cfg;
+
+err_exit_iomap:
+        dev_err(dev, "ECAM ioremap failed\n");
+err_exit_malloc:
+        err = -ENOMEM;
+err_exit:
+        pci_ecam_free(cfg);
+        return ERR_PTR(err);
+}
+```
+
+most important job of the ecam_create function is to generate config space 
+window through pci_remap_cfgspace which ioremap the address of pci bridge 
+retrieved from the reg value of pci. Remember that these addresses are the 
+address that can be accessible from the CPU. 
+
+```cpp
+static inline void __iomem *pci_remap_cfgspace(phys_addr_t offset,
+                                               size_t size)
+{
+        return ioremap_np(offset, size) ?: ioremap(offset, size);
+}
+
+#define ioremap_np(addr, size)  \
+        ioremap_prot((addr), (size), (PROT_DEVICE_nGnRnE | PROT_NS_SHARED)
+
+```
+
+
+```cpp
+int pci_host_common_probe(struct platform_device *pdev)                         
+{                                                                               
+	......
+        /* Parse and map our Configuration Space windows */                     
+        cfg = gen_pci_init(dev, bridge, ops);                                   
+        if (IS_ERR(cfg))                                                        
+                return PTR_ERR(cfg);                                            
+                                                                                
+        /* Do not reassign resources if probe only */                           
+        if (!pci_has_flag(PCI_PROBE_ONLY))                                      
+                pci_add_flags(PCI_REASSIGN_ALL_BUS);                            
+                                                                                
+        bridge->sysdata = cfg;                                                  
+        bridge->ops = (struct pci_ops *)&ops->pci_ops;                          
+        bridge->msi_domain = true;                                              
+                                                                                
+        return pci_host_probe(bridge);                                          
+}                             
+```
+As the kernel mapped the bus range of the pci bridge (specified by the reg value
+of the pci bridge in DTB), kernel can access the PCI bridge register values
+through the memory read/write. This configuration space information is stored in
+the bridge->sysdata, so that rest kernel initialization code can access device
+information through this MMIO config space. 
+
+##
+
+pci_scan_root_bus_bridge                                                        
+        pci_register_host_bridge                                                
+        pci_scan_child_bus                                                      
+                pci_scan_child_bus_extend                                       
+                        pci_scan_slot                                           
+                        pci_scan_single_device                                  
+                        pci_scan_device                                         
+pci_setup_device   
+
+
+```cpp
+int pci_host_probe(struct pci_host_bridge *bridge)
+{
+        struct pci_bus *bus, *child;
+        int ret;
+
+        ret = pci_scan_root_bus_bridge(bridge);
+        if (ret < 0) {
+                dev_err(bridge->dev.parent, "Scanning root bridge failed");
+                return ret;
+        }
+
+        bus = bridge->bus;
+
+        /*
+         * We insert PCI resources into the iomem_resource and
+         * ioport_resource trees in either pci_bus_claim_resources()
+         * or pci_bus_assign_resources().
+         */
+        if (pci_has_flag(PCI_PROBE_ONLY)) {
+                pci_bus_claim_resources(bus);
+        } else {
+                pci_bus_size_bridges(bus);
+                pci_bus_assign_resources(bus);
+
+                list_for_each_entry(child, &bus->children, node)
+                        pcie_bus_configure_settings(child);
+        }
+
+        pci_bus_add_devices(bus);
+        return 0;
+}
+```
+
+```cpp
+int pci_scan_root_bus_bridge(struct pci_host_bridge *bridge)
+{       
+        struct resource_entry *window;
+        bool found = false;
+        struct pci_bus *b;
+        int max, bus, ret;
+        
+        if (!bridge)
+                return -EINVAL;
+        
+        resource_list_for_each_entry(window, &bridge->windows)
+                if (window->res->flags & IORESOURCE_BUS) {
+                        bridge->busnr = window->res->start;
+                        found = true;
+                        break;
+                }
+        
+        ret = pci_register_host_bridge(bridge);
+        if (ret < 0)
+                return ret;
+        
+        b = bridge->bus;
+        bus = bridge->busnr;
+        
+        if (!found) {
+                dev_info(&b->dev,
+                 "No busn resource found for root bus, will use [bus %02x-ff]\n",
+                        bus);
+                pci_bus_insert_busn_res(b, bus, 255);
+        }
+        
+        max = pci_scan_child_bus(b);
+        
+        if (!found)
+                pci_bus_update_busn_res_end(b, max);
+        
+        return 0;
+}
+```
+
+```cpp
+static int pci_register_host_bridge(struct pci_host_bridge *bridge)
+{
+        struct device *parent = bridge->dev.parent;
+        struct resource_entry *window, *next, *n;
+        struct pci_bus *bus, *b;
+        resource_size_t offset, next_offset;
+        LIST_HEAD(resources);
+        struct resource *res, *next_res;
+        char addr[64], *fmt;
+        const char *name;
+        int err;
+
+        bus = pci_alloc_bus(NULL);
+        if (!bus)
+                return -ENOMEM;
+
+        bridge->bus = bus;
+
+	//bridge->sysdata is config space points to  ioremapped addr 
+	//bridge->ops is pci_generic_ecam_ops
+        bus->sysdata = bridge->sysdata;
+        bus->ops = bridge->ops;
+        bus->number = bus->busn_res.start = bridge->busnr;
+#ifdef CONFIG_PCI_DOMAINS_GENERIC
+        if (bridge->domain_nr == PCI_DOMAIN_NR_NOT_SET)
+                bus->domain_nr = pci_bus_find_domain_nr(bus, parent);
+        else
+                bus->domain_nr = bridge->domain_nr;
+        if (bus->domain_nr < 0) {
+                err = bus->domain_nr;
+                goto free;
+        }
+#endif
+
+        b = pci_find_bus(pci_domain_nr(bus), bridge->busnr);
+        if (b) {
+                /* Ignore it if we already got here via a different bridge */
+                dev_dbg(&b->dev, "bus already known\n");
+                err = -EEXIST;
+                goto free;
+        }
+
+        dev_set_name(&bridge->dev, "pci%04x:%02x", pci_domain_nr(bus),
+                     bridge->busnr);
+
+        err = pcibios_root_bridge_prepare(bridge);
+        if (err)
+                goto free;
+
+        /* Temporarily move resources off the list */
+        list_splice_init(&bridge->windows, &resources);
+        err = device_add(&bridge->dev);
+        if (err) {
+                put_device(&bridge->dev);
+                goto free;
+        }
+        bus->bridge = get_device(&bridge->dev);
+        device_enable_async_suspend(bus->bridge);
+        pci_set_bus_of_node(bus);
+        pci_set_bus_msi_domain(bus);
+        if (bridge->msi_domain && !dev_get_msi_domain(&bus->dev) &&
+            !pci_host_of_has_msi_map(parent))
+                bus->bus_flags |= PCI_BUS_FLAGS_NO_MSI;
+
+        if (!parent)
+                set_dev_node(bus->bridge, pcibus_to_node(bus));
+
+        bus->dev.class = &pcibus_class;
+        bus->dev.parent = bus->bridge;
+
+        dev_set_name(&bus->dev, "%04x:%02x", pci_domain_nr(bus), bus->number);
+        name = dev_name(&bus->dev);
+
+        err = device_register(&bus->dev);
+        if (err)
+                goto unregister;
+
+        pcibios_add_bus(bus);
+
+        if (bus->ops->add_bus) {
+                err = bus->ops->add_bus(bus);
+                if (WARN_ON(err < 0))
+                        dev_err(&bus->dev, "failed to add bus: %d\n", err);
+        }
+
+        /* Create legacy_io and legacy_mem files for this bus */
+        pci_create_legacy_files(bus);
+
+        if (parent)
+                dev_info(parent, "PCI host bridge to bus %s\n", name);
+        else
+                pr_info("PCI host bridge to bus %s\n", name);
+
+        if (nr_node_ids > 1 && pcibus_to_node(bus) == NUMA_NO_NODE)
+                dev_warn(&bus->dev, "Unknown NUMA node; performance will be reduced\n");
+
+        /* Coalesce contiguous windows */
+        resource_list_for_each_entry_safe(window, n, &resources) {
+                if (list_is_last(&window->node, &resources))
+                        break;
+
+                next = list_next_entry(window, node);
+                offset = window->offset;
+                res = window->res;
+                next_offset = next->offset;
+                next_res = next->res;
+
+                if (res->flags != next_res->flags || offset != next_offset)
+                        continue;
+
+                if (res->end + 1 == next_res->start) {
+                        next_res->start = res->start;
+                        res->flags = res->start = res->end = 0;
+                }
+        }
+
+        /* Add initial resources to the bus */
+        resource_list_for_each_entry_safe(window, n, &resources) {
+                offset = window->offset;
+                res = window->res;
+                if (!res->end)
+                        continue;
+
+                list_move_tail(&window->node, &bridge->windows);
+
+                if (res->flags & IORESOURCE_BUS)
+                        pci_bus_insert_busn_res(bus, bus->number, res->end);
+                else
+                        pci_bus_add_resource(bus, res, 0);
+
+                if (offset) {
+                        if (resource_type(res) == IORESOURCE_IO)
+                                fmt = " (bus address [%#06llx-%#06llx])";
+                        else
+                                fmt = " (bus address [%#010llx-%#010llx])";
+
+                        snprintf(addr, sizeof(addr), fmt,
+                                 (unsigned long long)(res->start - offset),
+                                 (unsigned long long)(res->end - offset));
+                } else
+                        addr[0] = '\0';
+                
+                dev_info(&bus->dev, "root bus resource %pR%s\n", res, addr);
+        }
+
+        down_write(&pci_bus_sem);
+        list_add_tail(&bus->node, &pci_root_buses);
+        up_write(&pci_bus_sem); 
+                        
+        return 0;
+
+unregister:
+        put_device(&bridge->dev);
+        device_del(&bridge->dev);
+        
+free:           
+#ifdef CONFIG_PCI_DOMAINS_GENERIC
+        pci_bus_release_domain_nr(bus, parent);
+#endif
+        kfree(bus);
+        return err;
+}
+```
+
+We already parse the bus information of the PCI bridge, but linux kernel needs 
+to initialize corresponding kernel device structure and other informations to 
+manage the bus. Most of the code is initialize pci_bus struct.
+
+```cpp
+struct pci_bus {
+        struct list_head node;          /* Node in list of buses */
+        struct pci_bus  *parent;        /* Parent bus this bridge is on */
+        struct list_head children;      /* List of child buses */
+        struct list_head devices;       /* List of devices on this bus */
+        struct pci_dev  *self;          /* Bridge device as seen by parent */
+        struct list_head slots;         /* List of slots on this bus;
+                                           protected by pci_slot_mutex */
+        struct resource *resource[PCI_BRIDGE_RESOURCE_NUM];
+        struct list_head resources;     /* Address space routed to this bus */
+        struct resource busn_res;       /* Bus numbers routed to this bus */
+
+        struct pci_ops  *ops;           /* Configuration access functions */
+        void            *sysdata;       /* Hook for sys-specific extension */
+        struct proc_dir_entry *procdir; /* Directory entry in /proc/bus/pci */
+
+        unsigned char   number;         /* Bus number */
+        unsigned char   primary;        /* Number of primary bridge */
+        unsigned char   max_bus_speed;  /* enum pci_bus_speed */
+        unsigned char   cur_bus_speed;  /* enum pci_bus_speed */
+#ifdef CONFIG_PCI_DOMAINS_GENERIC
+        int             domain_nr;
+#endif
+
+        char            name[48];
+
+        unsigned short  bridge_ctl;     /* Manage NO_ISA/FBB/et al behaviors */
+        pci_bus_flags_t bus_flags;      /* Inherited by child buses */
+        struct device           *bridge;
+        struct device           dev;
+        struct bin_attribute    *legacy_io;     /* Legacy I/O for this bus */
+        struct bin_attribute    *legacy_mem;    /* Legacy mem */
+        unsigned int            is_added:1;
+        unsigned int            unsafe_warn:1;  /* warned about RW1C config write */
+};
+```
+
+The attachment of the bus is done by pci_ecam_add_bus function. 
+
+```cpp
+static int pci_ecam_add_bus(struct pci_bus *bus)
+{       
+        struct pci_config_window *cfg = bus->sysdata;
+        unsigned int bsz = 1 << cfg->bus_shift;
+        unsigned int busn = bus->number;
+        phys_addr_t start;
+                
+        if (!per_bus_mapping)
+                return 0;
+        
+        if (busn < cfg->busr.start || busn > cfg->busr.end)
+                return -EINVAL;
+        
+        busn -= cfg->busr.start;
+        start = cfg->res.start + busn * bsz;
+        
+        cfg->winp[busn] = pci_remap_cfgspace(start, bsz);
+        if (!cfg->winp[busn])
+                return -ENOMEM;
+        
+        return 0;
+}               
+```
+However, because we target the 64 bit system, we don't need to add another bus.
+Instead, we can access entire pci config address spcae with single ioremap which
+previously mapped entire PCI config address range to cfg->win.
+
+After initialization of the bus, the devices attached to the bus should be 
+registered to the bus structure. Remember that we already parsed initial 
+resource of the PCI bridge and save them to the bridge->windows. Because they 
+are not registered to the bus structure as its resource yet, it should be 
+registered to the bus not the bridge. 
+
+```cpp
+void pci_bus_add_resource(struct pci_bus *bus, struct resource *res,
+                          unsigned int flags)
+{
+        struct pci_bus_resource *bus_res;
+        
+        bus_res = kzalloc(sizeof(struct pci_bus_resource), GFP_KERNEL);
+        if (!bus_res) {
+                dev_err(&bus->dev, "can't add %pR resource\n", res);
+                return;
+        }
+        
+        bus_res->res = res;
+        bus_res->flags = flags;
+        list_add_tail(&bus_res->list, &bus->resources);
+}       
+```
+The registration can be done just adding the bridge's resource to another list 
+maintained by the bus, bus->resources. 
+
+
+## Scanning child bus and attached devices
+Now we have bust and bridge structure maintained in the kernel space to control
+pci in the platform. However, note that still we haven't located the devices 
+attached to the bridge through the bus. We will take a look how to locate those
+devices attached to the bus and create new kernel structures for each device 
+including pcie device and possible another bus. 
+
+```cpp
+/**
+ * pci_scan_child_bus() - Scan devices below a bus
+ * @bus: Bus to scan for devices
+ *      
+ * Scans devices below @bus including subordinate buses. Returns new
+ * subordinate number including all the found devices.
+ */              
+unsigned int pci_scan_child_bus(struct pci_bus *bus)
+{               
+        return pci_scan_child_bus_extend(bus, 0);
+}                      
+```
+
+
+```cpp
+/**                     
+ * pci_scan_child_bus_extend() - Scan devices below a bus
+ * @bus: Bus to scan for devices
+ * @available_buses: Total number of buses available (%0 does not try to
+ *                   extend beyond the minimal)
+ *
+ * Scans devices below @bus including subordinate buses. Returns new
+ * subordinate number including all the found devices. Passing
+ * @available_buses causes the remaining bus space to be distributed
+ * equally between hotplug-capable bridges to allow future extension of the
+ * hierarchy.                   
+ */                             
+static unsigned int pci_scan_child_bus_extend(struct pci_bus *bus,
+                                              unsigned int available_buses)
+{                               
+        unsigned int used_buses, normal_bridges = 0, hotplug_bridges = 0;
+        unsigned int start = bus->busn_res.start;
+        unsigned int devfn, cmax, max = start;
+        struct pci_dev *dev;                    
+                                        
+        dev_dbg(&bus->dev, "scanning bus\n");
+                                
+        /* Go find them, Rover! */ 
+        for (devfn = 0; devfn < 256; devfn += 8)
+                pci_scan_slot(bus, devfn);
+
+        /* Reserve buses for SR-IOV capability */
+        used_buses = pci_iov_bus_range(bus);
+        max += used_buses;
+                                        
+        /*                              
+         * After performing arch-dependent fixup of the bus, look behind
+         * all PCI-to-PCI bridges on this bus.
+         */             
+        if (!bus->is_added) {
+                dev_dbg(&bus->dev, "fixups for bus\n");
+                pcibios_fixup_bus(bus);
+                bus->is_added = 1;
+        }
+
+        /*
+         * Calculate how many hotplug bridges and normal bridges there
+         * are on this bus. We will distribute the additional available
+         * buses between hotplug bridges.
+         */
+        for_each_pci_bridge(dev, bus) {
+                if (dev->is_hotplug_bridge)
+                        hotplug_bridges++;
+                else
+                        normal_bridges++;
+        }
+
+        /*
+         * Scan bridges that are already configured. We don't touch them
+         * unless they are misconfigured (which will be done in the second
+         * scan below).
+         */
+        for_each_pci_bridge(dev, bus) {
+                cmax = max;
+                max = pci_scan_bridge_extend(bus, dev, max, 0, 0);
+
+                /*
+                 * Reserve one bus for each bridge now to avoid extending
+                 * hotplug bridges too much during the second scan below.
+                 */
+                used_buses++;
+                if (max - cmax > 1)
+                        used_buses += max - cmax - 1;
+        }
+
+        /* Scan bridges that need to be reconfigured */
+        for_each_pci_bridge(dev, bus) {
+                unsigned int buses = 0;
+
+                if (!hotplug_bridges && normal_bridges == 1) {
+                        /*
+                         * There is only one bridge on the bus (upstream
+                         * port) so it gets all available buses which it
+                         * can then distribute to the possible hotplug
+                         * bridges below.
+                         */
+                        buses = available_buses;
+                } else if (dev->is_hotplug_bridge) {
+                        /*
+                         * Distribute the extra buses between hotplug
+                         * bridges if any.
+                         */
+                        buses = available_buses / hotplug_bridges;
+                        buses = min(buses, available_buses - used_buses + 1);
+                }
+
+                cmax = max;
+                max = pci_scan_bridge_extend(bus, dev, cmax, buses, 1);
+                /* One bus is already accounted so don't add it again */
+                if (max - cmax > 1)
+                        used_buses += max - cmax - 1;
+        }
+
+        /*
+         * Make sure a hotplug bridge has at least the minimum requested
+         * number of buses but allow it to grow up to the maximum available
+         * bus number if there is room.
+         */
+        if (bus->self && bus->self->is_hotplug_bridge) {
+                used_buses = max_t(unsigned int, available_buses,
+                                   pci_hotplug_bus_size - 1);
+                if (max - start < used_buses) {
+                        max = start + used_buses;
+
+                        /* Do not allocate more buses than we have room left */
+                        if (max > bus->busn_res.end)
+                                max = bus->busn_res.end;
+
+                        dev_dbg(&bus->dev, "%pR extended by %#02x\n",
+                                &bus->busn_res, max - start);
+                }
+        }
+
+        /*
+         * We've scanned the bus and so we know all about what's on
+         * the other side of any bridges that may be on this bus plus
+         * any devices.
+         *
+         * Return how far we've got finding sub-buses.
+         */
+        dev_dbg(&bus->dev, "bus scan returning with max=%02x\n", max);
+        return max;
+}
+```
+
+
+### Scanning slot on the bus
+```cpp
+/**
+ * pci_scan_slot - Scan a PCI slot on a bus for devices
+ * @bus: PCI bus to scan
+ * @devfn: slot number to scan (must have zero function)
+ *
+ * Scan a PCI slot on the specified PCI bus for devices, adding
+ * discovered devices to the @bus->devices list.  New devices
+ * will not have is_added set.
+ *
+ * Returns the number of new devices found.
+ */ 
+int pci_scan_slot(struct pci_bus *bus, int devfn)
+{       
+        struct pci_dev *dev;
+        int fn = 0, nr = 0;
+        
+        if (only_one_child(bus) && (devfn > 0))
+                return 0; /* Already scanned the entire slot */
+        
+        do {    
+                dev = pci_scan_single_device(bus, devfn + fn);
+                if (dev) { 
+                        if (!pci_dev_is_added(dev))
+                                nr++;
+                        if (fn > 0)
+                                dev->multifunction = 1;
+                } else if (fn == 0) {
+                        /*
+                         * Function 0 is required unless we are running on
+                         * a hypervisor that passes through individual PCI
+                         * functions.
+                         */
+                        if (!hypervisor_isolated_pci_functions())
+                                break;
+                }
+                fn = next_fn(bus, dev, fn);
+        } while (fn >= 0);
+        
+        /* Only one slot has PCIe device */
+        if (bus->self && nr)
+                pcie_aspm_init_link_state(bus->self);
+        
+        return nr;
+}
+EXPORT_SYMBOL(pci_scan_slot);
+```
+
+```cpp
+struct pci_dev *pci_scan_single_device(struct pci_bus *bus, int devfn)
+{
+        struct pci_dev *dev;
+
+        dev = pci_get_slot(bus, devfn);
+        if (dev) {
+                pci_dev_put(dev);
+                return dev;
+        }
+
+        dev = pci_scan_device(bus, devfn);
+        if (!dev)
+                return NULL;
+        
+        pci_device_add(dev, bus);
+                
+        return dev;
+}       
+EXPORT_SYMBOL(pci_scan_single_device);
+
+```
+
+### Actual PCI device scanning through reading config space
+
+```cpp
+/*
+ * Read the config data for a PCI device, sanity-check it,
+ * and fill in the dev structure.
+ */
+static struct pci_dev *pci_scan_device(struct pci_bus *bus, int devfn)
+{       
+        struct pci_dev *dev;
+        u32 l;  
+        
+        if (!pci_bus_read_dev_vendor_id(bus, devfn, &l, 60*1000))
+                return NULL;
+        
+        dev = pci_alloc_dev(bus);
+        if (!dev)
+                return NULL;
+
+        dev->devfn = devfn;
+        dev->vendor = l & 0xffff;
+        dev->device = (l >> 16) & 0xffff;
+
+        if (pci_setup_device(dev)) {
+                pci_bus_put(dev->bus);
+                kfree(dev);
+                return NULL;
+        }
+
+        return dev;                         
+	}         
+
+```
+
+
+
+```cpp
+bool pci_bus_read_dev_vendor_id(struct pci_bus *bus, int devfn, u32 *l,
+                                int timeout)
+{
+#ifdef CONFIG_PCI_QUIRKS
+        struct pci_dev *bridge = bus->self;
+        
+        /*
+         * Certain IDT switches have an issue where they improperly trigger
+         * ACS Source Validation errors on completions for config reads.
+         */
+        if (bridge && bridge->vendor == PCI_VENDOR_ID_IDT &&
+            bridge->device == 0x80b5)
+                return pci_idt_bus_quirk(bus, devfn, l, timeout);
+#endif  
+        
+        return pci_bus_generic_read_dev_vendor_id(bus, devfn, l, timeout);
+}
+EXPORT_SYMBOL(pci_bus_read_dev_vendor_id);
+```
+
+First it needs to read vendor id of the possibly connected device to the slot 
+number (devfn). The u32 pointer l is a variable to store information retrieved
+from the PCI config space of the slot. In this case, this information will 
+convey slot information including device and vendor ID.
+
+
+```cpp
+bool pci_bus_generic_read_dev_vendor_id(struct pci_bus *bus, int devfn, u32 *l,
+                                        int timeout)
+{       
+        if (pci_bus_read_config_dword(bus, devfn, PCI_VENDOR_ID, l))
+                return false;
+        
+        /* Some broken boards return 0 or ~0 (PCI_ERROR_RESPONSE) if a slot is empty: */
+        if (PCI_POSSIBLE_ERROR(*l) || *l == 0x00000000 ||
+            *l == 0x0000ffff || *l == 0xffff0000)
+                return false;
+        
+        if (pci_bus_crs_vendor_id(*l))
+                return pci_bus_wait_crs(bus, devfn, l, timeout);
+        
+        return true;
+}
+```
+
+
+```cpp
+#define PCI_OP_READ(size, type, len) \
+int noinline pci_bus_read_config_##size \
+        (struct pci_bus *bus, unsigned int devfn, int pos, type *value) \
+{                                                                       \
+        int res;                                                        \
+        unsigned long flags;                                            \
+        u32 data = 0;                                                   \
+        if (PCI_##size##_BAD) return PCIBIOS_BAD_REGISTER_NUMBER;       \
+        pci_lock_config(flags);                                         \
+        res = bus->ops->read(bus, devfn, pos, len, &data);              \
+        if (res)                                                        \
+                PCI_SET_ERROR_RESPONSE(value);                          \
+        else                                                            \
+                *value = (type)data;                                    \
+        pci_unlock_config(flags);                                       \
+        return res;                                                     \
+}
+        
+#define PCI_OP_WRITE(size, type, len) \
+int noinline pci_bus_write_config_##size \
+        (struct pci_bus *bus, unsigned int devfn, int pos, type value)  \
+{                                                                       \
+        int res;                                                        \
+        unsigned long flags;                                            \
+        if (PCI_##size##_BAD) return PCIBIOS_BAD_REGISTER_NUMBER;       \
+        pci_lock_config(flags);                                         \
+        res = bus->ops->write(bus, devfn, pos, len, value);             \
+        pci_unlock_config(flags);                                       \
+        return res;                                                     \
+}
+
+PCI_OP_READ(byte, u8, 1)
+PCI_OP_READ(word, u16, 2)
+PCI_OP_READ(dword, u32, 4)
+PCI_OP_WRITE(byte, u8, 1)
+PCI_OP_WRITE(word, u16, 2)
+PCI_OP_WRITE(dword, u32, 4)
+        
+EXPORT_SYMBOL(pci_bus_read_config_byte);
+EXPORT_SYMBOL(pci_bus_read_config_word);
+EXPORT_SYMBOL(pci_bus_read_config_dword);
+EXPORT_SYMBOL(pci_bus_write_config_byte);
+EXPORT_SYMBOL(pci_bus_write_config_word);
+EXPORT_SYMBOL(pci_bus_write_config_dword);
+```
+
+To easily read from and write to the configuration space, kernel provides macro
+functions. The operation is simple, calling read operation of the bus, which is 
+the ops of the bridge. Note that these operations could be different based on 
+which bridge is installed in the platform. Let's take a look at the details of 
+the pci read function.
+
+```cpp
+/* ECAM ops */  
+const struct pci_ecam_ops pci_generic_ecam_ops = {
+        .pci_ops        = {     
+                .add_bus        = pci_ecam_add_bus,
+                .remove_bus     = pci_ecam_remove_bus,
+                .map_bus        = pci_ecam_map_bus,
+                .read           = pci_generic_config_read,
+                .write          = pci_generic_config_write,
+        } 
+};
+```
+
+```cpp
+int pci_generic_config_read(struct pci_bus *bus, unsigned int devfn,
+                            int where, int size, u32 *val)
+{
+        void __iomem *addr;
+
+        addr = bus->ops->map_bus(bus, devfn, where);
+        if (!addr)
+                return PCIBIOS_DEVICE_NOT_FOUND;
+
+        if (size == 1)
+                *val = readb(addr);
+        else if (size == 2)
+                *val = readw(addr);
+        else
+                *val = readl(addr);
+
+        return PCIBIOS_SUCCESSFUL;
+}
+```
+
+Before reading the config space, it first invokes the map_bus function to 
+retrieve address to be read or written. 
+
+
+```cpp
+void __iomem *pci_ecam_map_bus(struct pci_bus *bus, unsigned int devfn,
+                               int where)
+{
+        struct pci_config_window *cfg = bus->sysdata;
+        unsigned int bus_shift = cfg->ops->bus_shift;
+        unsigned int devfn_shift = cfg->ops->bus_shift - 8;
+        unsigned int busn = bus->number;
+        void __iomem *base;
+        u32 bus_offset, devfn_offset;
+
+        if (busn < cfg->busr.start || busn > cfg->busr.end)
+                return NULL;
+
+        busn -= cfg->busr.start;
+        if (per_bus_mapping) {
+                base = cfg->winp[busn];
+                busn = 0; 
+        } else
+                base = cfg->win;
+
+        if (cfg->ops->bus_shift) {
+                bus_offset = (busn & PCIE_ECAM_BUS_MASK) << bus_shift;
+                devfn_offset = (devfn & PCIE_ECAM_DEVFN_MASK) << devfn_shift;
+                where &= PCIE_ECAM_REG_MASK;
+
+                return base + (bus_offset | devfn_offset | where);
+        }
+
+        return base + PCIE_ECAM_OFFSET(busn, devfn, where);
+}
+```
+
+Based on whether it has multiple parsed buses or single bus, it retrieves the 
+base address of the bus. Also, it adds PCIE_ECAM_OFFSET which is different 
+depending on the provided input to the function, which indicate the offset of 
+the target configuration in the bus. 
+
+
+```cpp
+/*      
+ * Enhanced Configuration Access Mechanism (ECAM)
+ *
+ * See PCI Express Base Specification, Revision 5.0, Version 1.0,
+ * Section 7.2.2, Table 7-1, p. 677.
+ */
+#define PCIE_ECAM_BUS_SHIFT     20 /* Bus number */ 
+#define PCIE_ECAM_DEVFN_SHIFT   12 /* Device and Function number */
+
+#define PCIE_ECAM_BUS_MASK      0xff
+#define PCIE_ECAM_DEVFN_MASK    0xff
+#define PCIE_ECAM_REG_MASK      0xfff /* Limit offset to a maximum of 4K */
+        
+#define PCIE_ECAM_BUS(x)        (((x) & PCIE_ECAM_BUS_MASK) << PCIE_ECAM_BUS_SHIFT)
+#define PCIE_ECAM_DEVFN(x)      (((x) & PCIE_ECAM_DEVFN_MASK) << PCIE_ECAM_DEVFN_SHIFT)
+#define PCIE_ECAM_REG(x)        ((x) & PCIE_ECAM_REG_MASK)
+        
+#define PCIE_ECAM_OFFSET(bus, devfn, where) \
+        (PCIE_ECAM_BUS(bus) | \
+         PCIE_ECAM_DEVFN(devfn) | \
+         PCIE_ECAM_REG(where))
+```
+
+ECAM has its own definition specifying where each function can be accessible on
+the bus, so based on the spec, we can define which location in the bus points to
+the configuration space of particular pcie slot. 
+
+After retrieving the address to be accessed based on the input information about
+the slot of the pci bus, it just accesses the address through the memory read 
+and write operations. Remember that ECAM provides MMIO accesses on the PCI 
+bridge instead of utilizing port IO.
+
+```cpp
+struct pci_dev *pci_alloc_dev(struct pci_bus *bus)
+{
+        struct pci_dev *dev;
+        
+        dev = kzalloc(sizeof(struct pci_dev), GFP_KERNEL);
+        if (!dev)
+                return NULL;
+
+        INIT_LIST_HEAD(&dev->bus_list);
+        dev->dev.type = &pci_dev_type;
+        dev->bus = pci_bus_get(bus);
+        dev->driver_exclusive_resource = (struct resource) {
+                .name = "PCI Exclusive",
+                .start = 0,
+                .end = -1,
+        };
+
+#ifdef CONFIG_PCI_MSI
+        raw_spin_lock_init(&dev->msi_lock);
+#endif
+        return dev;
+}
+```
+After retrieving the information of the pcie slot, it can allocate new pcie 
+device structure to maintain the attached device in that slot. 
+
+### Device initialization
+```cpp
+ * pci_setup_device - Fill in class and map information of a device
+ * @dev: the device structure to fill
+ *
+ * Initialize the device structure with information about the device's
+ * vendor,class,memory and IO-space addresses, IRQ lines etc.
+ * Called at initialisation of the PCI subsystem and by CardBus services.
+ * Returns 0 on success and negative if unknown type of device (not normal,
+ * bridge or CardBus).  
+ */                     
+int pci_setup_device(struct pci_dev *dev)
+{               
+        u32 class;
+        u16 cmd;
+        u8 hdr_type;
+        int pos = 0;
+        struct pci_bus_region region;               
+        struct resource *res;
+                
+        hdr_type = pci_hdr_type(dev);
+                
+        dev->sysdata = dev->bus->sysdata;
+        dev->dev.parent = dev->bus->bridge;
+        dev->dev.bus = &pci_bus_type;
+        dev->hdr_type = hdr_type & 0x7f;
+        dev->multifunction = !!(hdr_type & 0x80);
+        dev->error_state = pci_channel_io_normal;
+        set_pcie_port_type(dev);
+
+        pci_set_of_node(dev);
+        pci_set_acpi_fwnode(dev);
+                
+        pci_dev_assign_slot(dev);
+                        
+        /*              
+         * Assume 32-bit PCI; let 64-bit PCI cards (which are far rarer)
+         * set this higher, assuming the system even supports it.
+         */                     
+        dev->dma_mask = 0xffffffff;
+
+        dev_set_name(&dev->dev, "%04x:%02x:%02x.%d", pci_domain_nr(dev->bus),
+                     dev->bus->number, PCI_SLOT(dev->devfn),
+                     PCI_FUNC(dev->devfn));
+
+        class = pci_class(dev);
+
+        dev->revision = class & 0xff;
+        dev->class = class >> 8;                    /* upper 3 bytes */
+
+        if (pci_early_dump)
+                early_dump_pci_device(dev);
+
+        /* Need to have dev->class ready */
+        dev->cfg_size = pci_cfg_space_size(dev);
+
+        /* Need to have dev->cfg_size ready */
+        set_pcie_thunderbolt(dev);
+
+        set_pcie_untrusted(dev);
+
+        /* "Unknown power state" */
+        dev->current_state = PCI_UNKNOWN;
+
+        /* Early fixups, before probing the BARs */
+        pci_fixup_device(pci_fixup_early, dev);
+
+        pci_set_removable(dev);
+
+        pci_info(dev, "[%04x:%04x] type %02x class %#08x\n",
+                 dev->vendor, dev->device, dev->hdr_type, dev->class);
+
+        /* Device class may be changed after fixup */
+        class = dev->class >> 8;
+
+        if (dev->non_compliant_bars && !dev->mmio_always_on) {
+                pci_read_config_word(dev, PCI_COMMAND, &cmd);
+                if (cmd & (PCI_COMMAND_IO | PCI_COMMAND_MEMORY)) {
+                        pci_info(dev, "device has non-compliant BARs; disabling IO/MEM decoding\n");
+                        cmd &= ~PCI_COMMAND_IO;
+                        cmd &= ~PCI_COMMAND_MEMORY;
+                        pci_write_config_word(dev, PCI_COMMAND, cmd);
+                }
+        }
+
+        dev->broken_intx_masking = pci_intx_mask_broken(dev);
+```
+pci_setup_device consists of two big parts. The first part is to retrieve the 
+class and header type of the device through ECAM (MMIO read). Based on the 
+information, each device can be configured differently. Let's assume that the 
+device is PCI_HEADER_TYPE_NORMAL, and not a BRIDGE_PCI class. 
+
+
+```cpp
+        switch (dev->hdr_type) {                    /* header type */
+        case PCI_HEADER_TYPE_NORMAL:                /* standard header */
+                if (class == PCI_CLASS_BRIDGE_PCI)
+                        goto bad;
+                pci_read_irq(dev);
+                pci_read_bases(dev, 6, PCI_ROM_ADDRESS);
+
+                pci_subsystem_ids(dev, &dev->subsystem_vendor, &dev->subsystem_device);
+
+                /*
+                 * Do the ugly legacy mode stuff here rather than broken chip
+                 * quirk code. Legacy mode ATA controllers have fixed
+                 * addresses. These are not always echoed in BAR0-3, and
+                 * BAR0-3 in a few cases contain junk!
+                 */
+                if (class == PCI_CLASS_STORAGE_IDE) {
+                        u8 progif;
+                        pci_read_config_byte(dev, PCI_CLASS_PROG, &progif);
+                        if ((progif & 1) == 0) {
+                                region.start = 0x1F0;
+                                region.end = 0x1F7;
+                                res = &dev->resource[0];
+                                res->flags = LEGACY_IO_RESOURCE;
+                                pcibios_bus_to_resource(dev->bus, res, &region);
+                                pci_info(dev, "legacy IDE quirk: reg 0x10: %pR\n",
+                                         res);
+                                region.start = 0x3F6;
+                                region.end = 0x3F6;
+                                res = &dev->resource[1];
+                                res->flags = LEGACY_IO_RESOURCE;
+                                pcibios_bus_to_resource(dev->bus, res, &region);
+                                pci_info(dev, "legacy IDE quirk: reg 0x14: %pR\n",
+                                         res);
+                        }
+                        if ((progif & 4) == 0) {
+                                region.start = 0x170;
+                                region.end = 0x177;
+                                res = &dev->resource[2];
+                                res->flags = LEGACY_IO_RESOURCE;
+                                pcibios_bus_to_resource(dev->bus, res, &region);
+                                pci_info(dev, "legacy IDE quirk: reg 0x18: %pR\n",
+                                         res);
+                                region.start = 0x376;
+                                region.end = 0x376;
+                                res = &dev->resource[3];
+                                res->flags = LEGACY_IO_RESOURCE;
+                                pcibios_bus_to_resource(dev->bus, res, &region);
+                                pci_info(dev, "legacy IDE quirk: reg 0x1c: %pR\n",
+                                         res);
+                        }
+                }
+                break;
+	......
+        /* We found a fine healthy device, go go go... */
+        return 0;
+}
+```
+
+To initialize the device connected to the bus, we have to retrieve device 
+specific information particularly IRQ line and base address of the device memory.
+
+```cpp
+/*      
+ * Read interrupt line and base address registers.
+ * The architecture-dependent code can tweak these, of course.
+ */     
+static void pci_read_irq(struct pci_dev *dev)
+{                                        
+        unsigned char irq;
+                                
+        /* VFs are not allowed to use INTx, so skip the config reads */
+        if (dev->is_virtfn) {
+                dev->pin = 0;   
+                dev->irq = 0;
+                return;
+        }               
+        
+        pci_read_config_byte(dev, PCI_INTERRUPT_PIN, &irq);
+        dev->pin = irq;
+        if (irq) 
+                pci_read_config_byte(dev, PCI_INTERRUPT_LINE, &irq);
+        dev->irq = irq;
+}       
+
+int pci_read_config_byte(const struct pci_dev *dev, int where, u8 *val)
+{       
+        if (pci_dev_is_disconnected(dev)) {
+                PCI_SET_ERROR_RESPONSE(val);
+                return PCIBIOS_DEVICE_NOT_FOUND;
+        }
+        return pci_bus_read_config_byte(dev->bus, dev->devfn, where, val);
+}
+EXPORT_SYMBOL(pci_read_config_byte);
+```
+
+Reading and writing device specific information should always be achieved 
+through reading pcie config space. To access pcie config space, it should invoke
+one of the kernel defined macro functions (e.g., pci_bus_read_config_byte). Note
+that the pci_read_config_byte function invokes this macro to read pci config 
+space to retrieve the IRQ information of the connected device. 
+
+### Reading PCI bar
+Each PCIe device can have up to 6 different PAR. Therefore, this information 
+should be retrieved to initialize a kernel data structure, pci_device. Note that
+PCI BARs are also registers of the PCIe devices, which means that CPU, kernel 
+can access the registers through the MMIO with the help of ECAM.
+
+
+```cpp
+static void pci_read_bases(struct pci_dev *dev, unsigned int howmany, int rom)
+{               
+        unsigned int pos, reg;
+                        
+        if (dev->non_compliant_bars)
+                return;
+        
+        /* Per PCIe r4.0, sec 9.3.4.1.11, the VF BARs are all RO Zero */
+        if (dev->is_virtfn)
+                return; 
+                
+        for (pos = 0; pos < howmany; pos++) {
+                struct resource *res = &dev->resource[pos];
+                reg = PCI_BASE_ADDRESS_0 + (pos << 2);
+                pos += __pci_read_base(dev, pci_bar_unknown, res, reg);
+        }       
+                
+        if (rom) {
+                struct resource *res = &dev->resource[PCI_ROM_RESOURCE];
+                dev->rom_base_reg = rom;
+                res->flags = IORESOURCE_MEM | IORESOURCE_PREFETCH |
+                                IORESOURCE_READONLY | IORESOURCE_SIZEALIGN;
+                __pci_read_base(dev, pci_bar_mem32, res, rom);
+        }
+}
+```
+Since PCIe specification defines that each device can have up to 6 BARs, this 
+function iterates the loop until it reads all BARs through the PCIe config space.
+Also, note that the retrieved BAR information is stored in the resource array 
+of the device. This fields will be used later after the initialization to access
+BAR information through the pci_device structure instead of accessing the BAR
+every time through the MMIO.
+
+
