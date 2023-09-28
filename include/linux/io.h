@@ -84,6 +84,7 @@ void devm_memunmap(struct device *dev, void *addr);
 static inline void __iomem *pci_remap_cfgspace(phys_addr_t offset,
 					       size_t size)
 {
+	printk("[%s] Mapping %llx - %llx for pci bridge to allow CPU access \n", __func__, offset, offset+size);
 	return ioremap_np(offset, size) ?: ioremap(offset, size);
 }
 #endif

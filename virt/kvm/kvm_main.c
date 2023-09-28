@@ -5395,10 +5395,12 @@ int kvm_io_bus_register_dev(struct kvm *kvm, enum kvm_bus bus_idx, gpa_t addr,
 
 	if (bus_idx == KVM_MMIO_BUS) {
 		printk("HOST: %s (KVM_MMIO_BUS) ", __func__);
+#if 0
 		if (dev->ops->read) 
 			printk("%s:read (%p) ", __func__, dev->ops->read);
 		if (dev->ops->write)
 			printk("%s:write (%p)\n", __func__, dev->ops->write);
+#endif 
 	}
 	bus = kvm_get_bus(kvm, bus_idx);
 	if (!bus)

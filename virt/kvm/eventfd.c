@@ -843,7 +843,7 @@ static int kvm_assign_ioeventfd_idx(struct kvm *kvm,
 	kvm_iodevice_init(&p->dev, &ioeventfd_ops);
 
 	if (bus_idx == KVM_MMIO_BUS) {
-		printk("%s\n", __func__);
+		printk("[HOST]%s\n", __func__);
 	}
 	ret = kvm_io_bus_register_dev(kvm, bus_idx, p->addr, p->length,
 				      &p->dev);
