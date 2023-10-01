@@ -1090,7 +1090,10 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu)
 			ret = handle_exit(vcpu, ret);
 	}
 
-	//printk("GUEST needs to be involved\n");
+	//GUEST needs to be involved
+	phys_addr_t fault_ipa = kvm_vcpu_get_fault_ipa(vcpu);
+	if ((fault_ipa >= 0x50000000 && fault_ipa < 0x50020000) || fault_ipa == 0x40000000)
+		printk("Return to user?:%d exit_reason:%d\n", ret, vcpu->run->exit_reason);
 
 	/* Tell userspace about in-kernel device output levels */
 	if (unlikely(!irqchip_in_kernel(vcpu->kvm))) {

@@ -1221,7 +1221,8 @@ static int realm_map_ipa(struct kvm *kvm, phys_addr_t ipa, unsigned long hva,
 					    memcache);
 	}
 
-	//printk("%s:fault_ipa:%lx (mapping to protected\n", __func__, ipa);
+	if ((ipa >= 0x50000000 && ipa < 0x50020000) || ipa == 0x40000000)
+		printk("%s:fault_ipa:%lx (mapping to protected\n", __func__, ipa);
 	return realm_map_protected(realm, hva, ipa, page, map_size, memcache);
 }
 
@@ -1369,6 +1370,9 @@ static int user_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa,
 		 * In both cases, we don't let transparent_hugepage_adjust()
 		 * change things at the last minute.
 		 */
+		printk("device addr: %llx -> %llx\n", fault_ipa, 
+				(fault_ipa | (kvm_vcpu_get_hfar(vcpu) & ((1 << 12) - 1))) & ~gpa_stolen_mask);
+
 		device = true;
 	} else if (logging_active && !write_fault) {
 		/*
@@ -1505,6 +1509,8 @@ int kvm_handle_guest_abort(struct kvm_vcpu *vcpu)
 
 		/* Falls between the IPA range and the PARange? */
 		if (fault_ipa >= BIT_ULL(vcpu->arch.hw_mmu->pgt->ia_bits)) {
+			if ((fault_ipa >= 0x50000000 && fault_ipa < 0x50020000) || fault_ipa == 0x40000000) 
+				printk("fault at %llx falls between IPA range and PARANGE\n", fault_ipa);
 			fault_ipa |= kvm_vcpu_get_hfar(vcpu) & GENMASK(11, 0);
 
 			if (is_iabt)
@@ -1546,10 +1552,13 @@ int kvm_handle_guest_abort(struct kvm_vcpu *vcpu)
 	memslot = gfn_to_memslot(vcpu->kvm, gfn);
 	hva = gfn_to_hva_memslot_prot(memslot, gfn, &writable);
 	write_fault = kvm_is_write_fault(vcpu);
-#if 0
-	printk("fault_ipa:%llx instruction abort?:%d write_fault:%d is_protected?:%d fault_status:%x\n", 
-			fault_ipa, is_iabt, write_fault,
-		       	realm_is_addr_protected(&vcpu->kvm->arch.realm, fault_ipa), fault_status);
+#if 1
+	if ((fault_ipa >= 0x50000000 && fault_ipa < 0x50020000) || fault_ipa == 0x40000000) {
+		printk("fault_ipa:%llx -> %llx instruction abort?:%d write_fault:%d is_protected?:%d fault_status:%x\n", 
+				fault_ipa, (fault_ipa | (kvm_vcpu_get_hfar(vcpu) & ((1 << 12) - 1))) & ~gpa_stolen_mask,
+				is_iabt, write_fault,
+				realm_is_addr_protected(&vcpu->kvm->arch.realm, fault_ipa), fault_status);
+	}
 #endif 
 	if (kvm_is_error_hva(hva) || (write_fault && !writable)) {
 		/*
@@ -1558,9 +1567,10 @@ int kvm_handle_guest_abort(struct kvm_vcpu *vcpu)
 		 * anything about this (there's no syndrome for a start), so
 		 * re-inject the abort back into the guest.
 		 */
-#if 0
-		printk("error in hva?:%d \t write_fault:%d \t writable:%d \n",
-				kvm_is_error_hva(hva), write_fault, writable);
+#if 1
+		if ((fault_ipa >= 0x50000000 && fault_ipa < 0x50020000) || fault_ipa == 0x40000000) 
+			printk("error in hva?:%d \t write_fault:%d \t writable:%d \n",
+					kvm_is_error_hva(hva), write_fault, writable);
 #endif 
 
 		if (is_iabt) {
@@ -1569,6 +1579,8 @@ int kvm_handle_guest_abort(struct kvm_vcpu *vcpu)
 		}
 
 		if (kvm_vcpu_abt_iss1tw(vcpu)) {
+			if ((fault_ipa >= 0x50000000 && fault_ipa < 0x50020000) || fault_ipa == 0x40000000) 
+				printk("kvm_vcpu_abt_iss1tw\n");
 			kvm_inject_dabt(vcpu, kvm_vcpu_get_hfar(vcpu));
 			ret = 1;
 			goto out_unlock;
@@ -1585,6 +1597,8 @@ int kvm_handle_guest_abort(struct kvm_vcpu *vcpu)
 		 * cautious, and skip the instruction.
 		 */
 		if (kvm_is_error_hva(hva) && kvm_vcpu_dabt_is_cm(vcpu)) {
+			if (fault_ipa == 0x0050000000 || fault_ipa == 0x40000000)
+				printk("cache op\n");
 			kvm_incr_pc(vcpu);
 			ret = 1;
 			goto out_unlock;
@@ -1596,7 +1610,10 @@ int kvm_handle_guest_abort(struct kvm_vcpu *vcpu)
 		 * faulting VA. This is always 12 bits, irrespective
 		 * of the page size.
 		 */
-		//this is how to calculate fault ipa exactly
+		//this is how to calculate fault ipa exactly (including lowest 12bits)
+		if ((fault_ipa >= 0x50000000 && fault_ipa < 0x50020000) || fault_ipa == 0x40000000) 
+			printk("%llx -> %llx handled by the io_mem_abort \n", fault_ipa, 
+					(fault_ipa | (kvm_vcpu_get_hfar(vcpu) & ((1 << 12) - 1))) & ~gpa_stolen_mask);
 		fault_ipa |= kvm_vcpu_get_hfar(vcpu) & ((1 << 12) - 1);
 		fault_ipa &= ~gpa_stolen_mask;
 		ret = io_mem_abort(vcpu, fault_ipa);

@@ -138,6 +138,8 @@ int io_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa)
 	 * No valid syndrome? Ask userspace for help if it has
 	 * volunteered to do so, and bail out otherwise.
 	 */
+	if (fault_ipa == 0x0050000000 || fault_ipa == 0x40000000)
+		printk("[%s] fault_ipa:%llx\n", __func__, fault_ipa);
 	if (!kvm_vcpu_dabt_isvalid(vcpu)) {
 		if (test_bit(KVM_ARCH_FLAG_RETURN_NISV_IO_ABORT_TO_USER,
 			     &vcpu->kvm->arch.flags)) {
@@ -190,7 +192,7 @@ int io_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa)
 
 	if (!ret) {
 		/* We handled the access successfully in the kernel. */
-		//printk("MMIO Handled in kernel, no user exit!\n");
+		printk("[MMIO KERNEL]: fault_ipa:%llx\n", fault_ipa);
 		if (!is_write)
 			memcpy(run->mmio.data, data_buf, len);
 		vcpu->stat.mmio_exit_kernel++;
@@ -198,7 +200,8 @@ int io_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa)
 		return 1;
 	}
 
-	//printk("MMIO needs to be handled in user!\n");
+	if (fault_ipa < 0x1000000 && fault_ipa > 0x1000005)
+		printk("[MMIO USER]: fault_ipa:%llx\n", fault_ipa);
 	if (is_write)
 		memcpy(run->mmio.data, data_buf, len);
 	vcpu->stat.mmio_exit_user++;
