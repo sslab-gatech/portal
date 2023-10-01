@@ -589,17 +589,6 @@ the bridge->sysdata, so that rest kernel initialization code can access device
 information through this MMIO config space. 
 
 ##
-
-pci_scan_root_bus_bridge                                                        
-        pci_register_host_bridge                                                
-        pci_scan_child_bus                                                      
-                pci_scan_child_bus_extend                                       
-                        pci_scan_slot                                           
-                        pci_scan_single_device                                  
-                        pci_scan_device                                         
-pci_setup_device   
-
-
 ```cpp
 int pci_host_probe(struct pci_host_bridge *bridge)
 {
@@ -1669,9 +1658,317 @@ static void pci_read_bases(struct pci_dev *dev, unsigned int howmany, int rom)
 ```
 Since PCIe specification defines that each device can have up to 6 BARs, this 
 function iterates the loop until it reads all BARs through the PCIe config space.
-Also, note that the retrieved BAR information is stored in the resource array 
-of the device. This fields will be used later after the initialization to access
-BAR information through the pci_device structure instead of accessing the BAR
-every time through the MMIO.
+Also, note that the retrieved BAR information, particularly the base and its
+size are stored in the resource array of the device. This fields will be used 
+later by the device driver of the PCIe device. Note that the BAR information is 
+stored as the resource of pci_device structure. Therefore, instead of accessing 
+config space from the device driver, it can easily access the BAR information 
+and map the region to retrieve further device specific information.
+
+```cpp
+void pci_device_add(struct pci_dev *dev, struct pci_bus *bus)
+{       
+        int ret;
+        
+        pci_configure_device(dev);
+
+        device_initialize(&dev->dev);
+        dev->dev.release = pci_release_dev;
+        
+        set_dev_node(&dev->dev, pcibus_to_node(bus));
+        dev->dev.dma_mask = &dev->dma_mask;
+        dev->dev.dma_parms = &dev->dma_parms;
+        dev->dev.coherent_dma_mask = 0xffffffffull;
+
+        dma_set_max_seg_size(&dev->dev, 65536);
+        dma_set_seg_boundary(&dev->dev, 0xffffffff);
+
+        /* Fix up broken headers */
+        pci_fixup_device(pci_fixup_header, dev);
+        
+        pci_reassigndev_resource_alignment(dev);
+
+        dev->state_saved = false;
+
+        pci_init_capabilities(dev);
+        
+        /*
+         * Add the device to our list of discovered devices
+         * and the bus list for fixup functions, etc.
+         */     
+        down_write(&pci_bus_sem);
+        list_add_tail(&dev->bus_list, &bus->devices);
+        up_write(&pci_bus_sem);
+        
+        ret = pcibios_device_add(dev);
+        WARN_ON(ret < 0);
+                
+        /* Set up MSI IRQ domain */
+        pci_set_msi_domain(dev);
+        
+        /* Notifier could use PCI capabilities */
+        dev->match_driver = false;
+        ret = device_add(&dev->dev);
+        WARN_ON(ret < 0);
+}      
+```
+
+
+
+```cpp
+static void pci_configure_device(struct pci_dev *dev)
+{               
+        pci_configure_mps(dev);
+        pci_configure_extended_tags(dev, NULL);
+        pci_configure_relaxed_ordering(dev);
+        pci_configure_ltr(dev);
+        pci_configure_eetlp_prefix(dev);
+        pci_configure_serr(dev);
+        
+        pci_acpi_program_hp_params(dev);
+}
+```
+
+After enumerating the BARs of the PCIe device, we should initialize the device 
+registers to utilize it. For example, pci_configure_device function invokes 
+pci_configure_mps which configures maximum payload size. I will not cover the 
+details. 
+
+```cpp
+static void pci_init_capabilities(struct pci_dev *dev)
+{       
+        pci_ea_init(dev);               /* Enhanced Allocation */
+        pci_msi_init(dev);              /* Disable MSI */
+        pci_msix_init(dev);             /* Disable MSI-X */
+                
+        /* Buffers for saving PCIe and PCI-X capabilities */
+        pci_allocate_cap_save_buffers(dev);
+        
+        pci_pm_init(dev);               /* Power Management */
+        pci_vpd_init(dev);              /* Vital Product Data */
+        pci_configure_ari(dev);         /* Alternative Routing-ID Forwarding */
+        pci_iov_init(dev);              /* Single Root I/O Virtualization */
+        pci_ats_init(dev);              /* Address Translation Services */
+        pci_pri_init(dev);              /* Page Request Interface */
+        pci_pasid_init(dev);            /* Process Address Space ID */
+        pci_acs_init(dev);              /* Access Control Services */
+        pci_ptm_init(dev);              /* Precision Time Measurement */
+        pci_aer_init(dev);              /* Advanced Error Reporting */
+        pci_dpc_init(dev);              /* Downstream Port Containment */
+        pci_rcec_init(dev);             /* Root Complex Event Collector */
+
+        pcie_report_downtraining(dev);
+        pci_init_reset_methods(dev);
+}
+```
+
+Also, based on the kernel configuration and other settings, it might or might 
+not support specific features related with the PCI. 
+
+
+## 
+Let's go back to pci_host_probe function and continue the initialization.
+```cpp
+void pci_bus_assign_resources(const struct pci_bus *bus)
+{       
+        __pci_bus_assign_resources(bus, NULL, NULL);
+}
+
+void __pci_bus_assign_resources(const struct pci_bus *bus,
+                                struct list_head *realloc_head,
+                                struct list_head *fail_head)
+{       
+        struct pci_bus *b;
+        struct pci_dev *dev;
+        
+        pbus_assign_resources_sorted(bus, realloc_head, fail_head);
+        
+        list_for_each_entry(dev, &bus->devices, bus_list) {
+                pdev_assign_fixed_resources(dev);
+                
+                b = dev->subordinate;
+                if (!b) 
+                        continue;
+                
+                __pci_bus_assign_resources(b, realloc_head, fail_head);
+                
+                switch (dev->hdr_type) {
+                case PCI_HEADER_TYPE_BRIDGE:
+                        if (!pci_is_enabled(dev))
+                                pci_setup_bridge(b);
+                        break;
+                
+                case PCI_HEADER_TYPE_CARDBUS:
+                        pci_setup_cardbus(b);
+                        break;
+                
+                default:
+                        pci_info(dev, "not setting up bridge for bus %04x:%02x\n",
+                                 pci_domain_nr(b), b->number);
+                        break;
+                }
+        }
+}
+
+
+```
+
+
+```cpp
+static void pbus_assign_resources_sorted(const struct pci_bus *bus,
+                                         struct list_head *realloc_head,
+                                         struct list_head *fail_head)
+{
+        struct pci_dev *dev;
+        LIST_HEAD(head);
+
+        list_for_each_entry(dev, &bus->devices, bus_list)
+                __dev_sort_resources(dev, &head);
+
+        __assign_resources_sorted(&head, realloc_head, fail_head);
+}
+```
+
+
+## PCIe device driver: How to utilize BAR information
+Through the long procedure of the PCIe bridge and slot initialization, kernel 
+maintains corresponding data structures to manage the devices. Let's see how the 
+device driver of the PCIe devices attached to the bridge can access those info 
+stored in the core kernel and utilize them to communicate with devices. 
+
+```cpp
+static int e1000_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
+{       
+        struct net_device *netdev;
+        struct e1000_adapter *adapter = NULL;
+        struct e1000_hw *hw;
+        
+        static int cards_found;
+        static int global_quad_port_a; /* global ksp3 port a indication */
+        int i, err, pci_using_dac;
+        u16 eeprom_data = 0;
+        u16 tmp = 0;
+        u16 eeprom_apme_mask = E1000_EEPROM_APME;
+        int bars, need_ioport;
+        bool disable_dev = false;
+        
+        /* do not allocate ioport bars when not needed */
+        need_ioport = e1000_is_need_ioport(pdev);
+        if (need_ioport) {
+                bars = pci_select_bars(pdev, IORESOURCE_MEM | IORESOURCE_IO);
+                err = pci_enable_device(pdev);
+        } else {
+                bars = pci_select_bars(pdev, IORESOURCE_MEM);
+                err = pci_enable_device_mem(pdev);
+        }
+        if (err)
+                return err;
+        
+        err = pci_request_selected_regions(pdev, bars, e1000_driver_name);
+        if (err)
+                goto err_pci_reg;
+        
+        pci_set_master(pdev);
+        err = pci_save_state(pdev);
+        if (err)
+                goto err_alloc_etherdev;
+        
+        err = -ENOMEM;
+        netdev = alloc_etherdev(sizeof(struct e1000_adapter));
+        if (!netdev) 
+                goto err_alloc_etherdev;
+        
+        SET_NETDEV_DEV(netdev, &pdev->dev);
+
+	pci_set_drvdata(pdev, netdev);
+        adapter = netdev_priv(netdev);
+        adapter->netdev = netdev;
+        adapter->pdev = pdev; 
+        adapter->msg_enable = netif_msg_init(debug, DEFAULT_MSG_ENABLE);
+        adapter->bars = bars;
+        adapter->need_ioport = need_ioport;
+        
+        hw = &adapter->hw;
+        hw->back = adapter;
+        
+        err = -EIO; 
+        hw->hw_addr = pci_ioremap_bar(pdev, BAR_0);
+        if (!hw->hw_addr)
+                goto err_ioremap;
+        
+        if (adapter->need_ioport) { 
+                for (i = BAR_1; i < PCI_STD_NUM_BARS; i++) {
+                        if (pci_resource_len(pdev, i) == 0)
+                                continue;
+                        if (pci_resource_flags(pdev, i) & IORESOURCE_IO) {
+                                hw->io_base = pci_resource_start(pdev, i);
+                                break;
+                        }
+                }
+        }
+	......
+```
+
+Although the core PCI bridge locate the basic primitives of each pcie slot, for 
+example the BARs, each device driver should configure its device by accessing 
+the BARs and PCI config space. For example, to enable the DMA on the device, it 
+should send proper command through the PCI config space. 
+
+```cpp
+static void __pci_set_master(struct pci_dev *dev, bool enable)
+{       
+        u16 old_cmd, cmd;
+        
+        pci_read_config_word(dev, PCI_COMMAND, &old_cmd);
+        if (enable)
+                cmd = old_cmd | PCI_COMMAND_MASTER;
+        else            
+                cmd = old_cmd & ~PCI_COMMAND_MASTER;
+        if (cmd != old_cmd) {
+                pci_dbg(dev, "%s bus mastering\n",
+                        enable ? "enabling" : "disabling");
+                pci_write_config_word(dev, PCI_COMMAND, cmd);
+        }
+        dev->is_busmaster = enable;
+}
+```
+Also, to access further information of the device, driver should map the BARs. 
+Remember that the PCI core already retrieved the primitive information of the 
+BARs (e.g., sizes and base addr). Therefore, each driver can easily access the 
+BARs through the MMIO. pci_ioremap_bar is a good place to take a look how the 
+BAR is mapped and become accessible from the CPU. 
+
+```cpp
+void __iomem *pci_ioremap_bar(struct pci_dev *pdev, int bar)
+{       
+        return __pci_ioremap_resource(pdev, bar, false);
+}
+
+static void __iomem *__pci_ioremap_resource(struct pci_dev *pdev, int bar,
+                                            bool write_combine)
+{       
+        struct resource *res = &pdev->resource[bar];
+        resource_size_t start = res->start;
+        resource_size_t size = resource_size(res);
+        
+        /*
+         * Make sure the BAR is actually a memory resource, not an IO resource
+         */
+        if (res->flags & IORESOURCE_UNSET || !(res->flags & IORESOURCE_MEM)) {
+                pci_err(pdev, "can't ioremap BAR %d: %pR\n", bar, res);
+                return NULL;
+        }
+        
+        if (write_combine)
+                return ioremap_wc(start, size);
+        
+        return ioremap(start, size);
+}
+```
+
+It is very easy to make the BAR accessible from the CPU because we already have 
+the all required information of the BAR such as size and base address. It just 
+retrieves the information from the resource of the pci_device and invoke ioremap
+function to get CPU accessible address. 
 
 

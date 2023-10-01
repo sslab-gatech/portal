@@ -1324,6 +1324,7 @@ out_unlock:
 
 
 
+
 ```cpp
 static int __iommu_group_set_domain(struct iommu_group *group,
                                     struct iommu_domain *new_domain)
@@ -1367,8 +1368,65 @@ static int __iommu_group_set_domain(struct iommu_group *group,
 
 
 
-##
-### Userspace invoking VFIO_IOMMU_MAP_DMA
+## Establish IOMMU mapping for pci
+To establish IOMMU mapping for vfio device, vfio_iommu_driver provides service
+for user processes. I will go through ioctl function dedicated for this and go
+through several functions called up until invoking the function related with 
+generating IOMMU mapping. 
+
+
+### Userspace (kvmtool) invoking VFIO_IOMMU_MAP_DMA
+```cpp
+static int vfio_container_init(struct kvm *kvm)
+{       
+        int api, i, ret, iommu_type;;
+        
+        pr_info("%s: Start\n", __func__);
+        /* Create a container for our IOMMU groups */
+        vfio_container = open(VFIO_DEV_NODE, O_RDWR);
+        if (vfio_container == -1) {
+                ret = errno;
+                pr_err("Failed to open %s", VFIO_DEV_NODE);
+                return ret;
+        }
+        
+        api = ioctl(vfio_container, VFIO_GET_API_VERSION);
+        if (api != VFIO_API_VERSION) {
+                pr_err("Unknown VFIO API version %d", api);
+                return -ENODEV;
+        }
+        
+        iommu_type = vfio_get_iommu_type();
+        pr_info("%s: get_iommu_type\n", __func__);
+        if (iommu_type < 0) {
+                pr_err("VFIO type-1 IOMMU not supported on this platform");
+                return iommu_type;
+        }
+        
+        /* Create groups for our devices and add them to the container */
+        for (i = 0; i < kvm->cfg.num_vfio_devices; ++i) {
+                vfio_devices[i].params = &kvm->cfg.vfio_devices[i];
+                ret = vfio_device_init(kvm, &vfio_devices[i]);
+                if (ret)
+                        return ret;
+        }
+        pr_info("FINISHING Attaching devices in the group to iommu_group");
+
+        /* Finalise the container */
+        pr_info("VFIO_SET_IOMMU");
+        if (ioctl(vfio_container, VFIO_SET_IOMMU, iommu_type)) {
+                ret = -errno;
+                pr_err("Failed to set IOMMU type %d for VFIO container",
+                       iommu_type);
+                return ret;
+        } else {
+                pr_info("Using IOMMU type %d for VFIO container", iommu_type);
+        }
+
+        return kvm__for_each_mem_bank(kvm, KVM_MEM_TYPE_RAM, vfio_map_mem_bank,
+                                      NULL);
+}
+```
 Generally, there would be two KVM_MEM_TYPE_RAM memory banks: one for the guest 
 kernel and the other for the para-virtualized space. For those two memory 
 regions or more, the vfio_map_mem_bank function is invoked and register GPA in 
@@ -1396,10 +1454,12 @@ static int vfio_map_mem_bank(struct kvm *kvm, struct kvm_mem_bank *bank, void *d
         return ret;
 }
 ```
+KVMTOOL iterates all KVM_MEM_TYPE_RAM and invokes ioctl to vfio_container. Note 
+that dma_map variable conveys memory information that needs to be mapped in the 
+IOMMU to the kernel driver. Note that the guest_phys_addr (iova) and host_addr 
+(mapped to the guest) are passed to the driver altogether. 
 
-KVMTOOL iterates all KVM_MEM_TYPE_RAM and invokes ioctl to vfio_container. 
-
-### kernel vfio side handling for VFIO_IOMMU_MAP_DMA
+### kernel-side handling for VFIO_IOMMU_MAP_DMA
 
 ```cpp
 static long vfio_fops_unl_ioctl(struct file *filep,
@@ -1590,6 +1650,1419 @@ static int vfio_dma_do_map(struct vfio_iommu *iommu,
 out_unlock:
         mutex_unlock(&iommu->lock);
         return ret;
+}
+
+
+```
+
+
+
+
+## Register VFIO BAR as KVM memory
+### KVMTOOl
+```cpp
+static int vfio__init(struct kvm *kvm)
+{       
+        int ret;
+        
+        if (!kvm->cfg.num_vfio_devices)
+                return 0;
+        
+        vfio_devices = calloc(kvm->cfg.num_vfio_devices, sizeof(*vfio_devices));
+        if (!vfio_devices)
+                return -ENOMEM;
+                
+        ret = vfio_container_init(kvm);
+        if (ret)
+                return ret;
+        
+        ret = vfio_configure_groups(kvm);
+        if (ret)
+                return ret;
+                
+        ret = vfio_configure_devices(kvm);
+        if (ret)
+                return ret;
+        
+        return 0;
+}       
+```
+
+### Configuring VFIO devices 
+```cpp
+static int vfio_configure_devices(struct kvm *kvm)
+{
+        int i, ret;
+
+        for (i = 0; i < kvm->cfg.num_vfio_devices; ++i) {
+                ret = vfio_configure_device(kvm, &vfio_devices[i]);
+                if (ret)
+                        return ret;
+        }
+
+        return 0;
+}
+```
+
+```cpp
+static int vfio_configure_device(struct kvm *kvm, struct vfio_device *vdev)
+{       
+        int ret;
+        struct vfio_group *group = vdev->group;
+        
+        vdev->fd = ioctl(group->fd, VFIO_GROUP_GET_DEVICE_FD,
+                         vdev->params->name);
+        if (vdev->fd < 0) {
+                vfio_dev_warn(vdev, "failed to get fd");
+                
+                /* The device might be a bridge without an fd */
+                return 0;
+        }
+        
+        vdev->info.argsz = sizeof(vdev->info);
+        if (ioctl(vdev->fd, VFIO_DEVICE_GET_INFO, &vdev->info)) {
+                ret = -errno;
+                vfio_dev_err(vdev, "failed to get info");
+                goto err_close_device;
+        }
+        
+        if (vdev->info.flags & VFIO_DEVICE_FLAGS_RESET &&
+            ioctl(vdev->fd, VFIO_DEVICE_RESET) < 0)
+                vfio_dev_warn(vdev, "failed to reset device");
+        
+        vdev->regions = calloc(vdev->info.num_regions, sizeof(*vdev->regions));
+        if (!vdev->regions) {
+                ret = -ENOMEM;
+                goto err_close_device;
+        }
+        
+        /* Now for the bus-specific initialization... */
+        switch (vdev->params->type) {
+        case VFIO_DEVICE_PCI:
+                BUG_ON(!(vdev->info.flags & VFIO_DEVICE_FLAGS_PCI));
+                ret = vfio_pci_setup_device(kvm, vdev);
+                break;
+        default:
+                BUG_ON(1);
+                ret = -EINVAL;
+        }
+        
+        if (ret)
+                goto err_free_regions;
+        
+        vfio_dev_info(vdev, "assigned to device number 0x%x in group %lu",
+                      vdev->dev_hdr.dev_num, group->id);
+        
+        return 0;
+
+err_free_regions:
+        free(vdev->regions);
+err_close_device:
+        close(vdev->fd);
+        
+        return ret;
+}       
+```
+First of all, it invokes VFIO_GROUP_GET_DEVICE_FD ioctl to get the descriptor 
+of the device. Through this ioctl call, kernel opens the device file matching 
+the provided device name in the group. If there is matching device, it returns.
+
+To initialize the vfio devices, first it asks the kernel to give vfio device 
+information through VFIO_DEVICE_GET_INFO ioctl. The information includes the 
+number of regions and IRQ assigned to the device. It allocates the regions array
+and assign it to vdev. As we assume that the vfio device is PCI, it will invoke 
+vfio_pci_setup_device function. Note that this function initialize information 
+of the pdev such as regions. 
+
+
+```cpp
+int vfio_pci_setup_device(struct kvm *kvm, struct vfio_device *vdev)
+{       
+        int ret;
+        
+        ret = vfio_pci_configure_dev_regions(kvm, vdev);
+        if (ret) {                        
+                vfio_dev_err(vdev, "failed to configure regions");
+                return ret;
+        }
+        
+        vdev->dev_hdr = (struct device_header) {
+                .bus_type       = DEVICE_BUS_PCI,
+                .data           = &vdev->pci.hdr,
+        };
+        
+        ret = device__register(&vdev->dev_hdr);
+        if (ret) {
+                vfio_dev_err(vdev, "failed to register VFIO device");
+                return ret;
+        }       
+                        
+        ret = vfio_pci_configure_dev_irqs(kvm, vdev);
+        if (ret) {
+                vfio_dev_err(vdev, "failed to configure IRQs");
+                return ret;
+        }       
+                        
+        return 0;
+}
+```
+
+### Retrieve BAR regions and PCI header information 
+As we initialized the VFIO and bind the devices to the VFIO PCI driver, we can 
+ask kernel to give information of the devices through the ioctl. Below is the 
+kernel documentation about the VFIO pci devices regarding to its interface to 
+bind/retrieve information of the device. 
+
+```cpp
+VFIO bus drivers, such as vfio-pci make use of only a few interfaces
+into VFIO core.  When devices are bound and unbound to the driver,
+the driver should call vfio_register_group_dev() and
+vfio_unregister_group_dev() respectively::
+
+        void vfio_init_group_dev(struct vfio_device *device,
+                                struct device *dev,
+                                const struct vfio_device_ops *ops);
+        void vfio_uninit_group_dev(struct vfio_device *device);
+        int vfio_register_group_dev(struct vfio_device *device);
+        void vfio_unregister_group_dev(struct vfio_device *device);
+
+The driver should embed the vfio_device in its own structure and call
+vfio_init_group_dev() to pre-configure it before going to registration
+and call vfio_uninit_group_dev() after completing the un-registration.
+vfio_register_group_dev() indicates to the core to begin tracking the
+iommu_group of the specified dev and register the dev as owned by a VFIO bus
+driver. Once vfio_register_group_dev() returns it is possible for userspace to
+start accessing the driver, thus the driver should ensure it is completely
+ready before calling it. The driver provides an ops structure for callbacks
+similar to a file operations structure::
+
+        struct vfio_device_ops {
+                int     (*open)(struct vfio_device *vdev);
+                void    (*release)(struct vfio_device *vdev);
+                ssize_t (*read)(struct vfio_device *vdev, char __user *buf,
+                                size_t count, loff_t *ppos);
+                ssize_t (*write)(struct vfio_device *vdev,
+                                 const char __user *buf,
+                                 size_t size, loff_t *ppos);
+                long    (*ioctl)(struct vfio_device *vdev, unsigned int cmd,
+                                 unsigned long arg);
+                int     (*mmap)(struct vfio_device *vdev,
+                                struct vm_area_struct *vma);
+        };
+
+Each function is passed the vdev that was originally registered
+in the vfio_register_group_dev() call above.  This allows the bus driver
+to obtain its private data using container_of().  The open/release
+callbacks are issued when a new file descriptor is created for a
+device (via VFIO_GROUP_GET_DEVICE_FD).  The ioctl interface provides
+a direct pass through for VFIO_DEVICE_* ioctls.  The read/write/mmap
+interfaces implement the device region access defined by the device's
+own VFIO_DEVICE_GET_REGION_INFO ioctl.
+```
+
+Based on the documentation, we can understand that the device file serve as an
+very important interface between the user and kernel allowing the kvmtool to 
+access the device specific information. 
+
+```cpp
+static const struct vfio_device_ops vfio_pci_ops = {
+        .name           = "vfio-pci",
+        .init           = vfio_pci_core_init_dev,
+        .release        = vfio_pci_core_release_dev,
+        .open_device    = vfio_pci_open_device,
+        .close_device   = vfio_pci_core_close_device,
+        .ioctl          = vfio_pci_core_ioctl,
+        .device_feature = vfio_pci_core_ioctl_feature,
+        .read           = vfio_pci_core_read,
+        .write          = vfio_pci_core_write,
+        .mmap           = vfio_pci_core_mmap,
+        .request        = vfio_pci_core_request,
+        .match          = vfio_pci_core_match,
+        .bind_iommufd   = vfio_iommufd_physical_bind,
+        .unbind_iommufd = vfio_iommufd_physical_unbind,
+        .attach_ioas    = vfio_iommufd_physical_attach_ioas,
+};
+```
+
+
+```cpp
+static int vfio_pci_configure_dev_regions(struct kvm *kvm,
+                                          struct vfio_device *vdev)
+{       
+        int ret;
+        u32 bar;
+        size_t i;
+        bool is_64bit = false; 
+        struct vfio_pci_device *pdev = &vdev->pci;
+        
+        ret = vfio_pci_parse_cfg_space(vdev);
+        if (ret)
+                return ret;
+        
+        if (pdev->irq_modes & VFIO_PCI_IRQ_MODE_MSIX) {
+                ret = vfio_pci_create_msix_table(kvm, vdev);
+                if (ret)
+                        return ret;
+        }
+        
+        if (pdev->irq_modes & VFIO_PCI_IRQ_MODE_MSI) {
+                ret = vfio_pci_create_msi_cap(kvm, pdev);
+                if (ret)
+                        return ret;
+        }
+        
+        for (i = VFIO_PCI_BAR0_REGION_INDEX; i <= VFIO_PCI_BAR5_REGION_INDEX; ++i) {
+                /* Ignore top half of 64-bit BAR */
+                if (is_64bit) {
+                        is_64bit = false;
+                        continue;
+                }
+                
+                ret = vfio_pci_configure_bar(kvm, vdev, i);
+                if (ret)
+                        return ret;
+                
+                bar = pdev->hdr.bar[i];
+                is_64bit = (bar & PCI_BASE_ADDRESS_SPACE) ==
+                           PCI_BASE_ADDRESS_SPACE_MEMORY &&
+                           bar & PCI_BASE_ADDRESS_MEM_TYPE_64;
+        }
+        
+        /* We've configured the BARs, fake up a Configuration Space */
+        ret = vfio_pci_fixup_cfg_space(vdev);
+        if (ret)
+                return ret;
+        
+        return pci__register_bar_regions(kvm, &pdev->hdr, vfio_pci_bar_activate,
+                                         vfio_pci_bar_deactivate, vdev);
+}
+```
+Two important information about the pci device, the bar region and header of the 
+pci device, is retrieved from the below function. 
+
+## Retrieving PCI config space info (VFIO_DEVICE_GET_REGION_INFO)
+```cpp
+static int vfio_pci_parse_cfg_space(struct vfio_device *vdev)
+{                                         
+        ssize_t sz = PCI_DEV_CFG_SIZE_LEGACY;
+        struct vfio_region_info *info;
+        struct vfio_pci_device *pdev = &vdev->pci;
+        
+        if (vdev->info.num_regions < VFIO_PCI_CONFIG_REGION_INDEX) {
+                vfio_dev_err(vdev, "Config Space not found");
+                return -ENODEV;
+        }
+        
+        info = &vdev->regions[VFIO_PCI_CONFIG_REGION_INDEX].info;
+        *info = (struct vfio_region_info) {
+                        .argsz = sizeof(*info),
+                        .index = VFIO_PCI_CONFIG_REGION_INDEX,
+        };      
+                        
+        ioctl(vdev->fd, VFIO_DEVICE_GET_REGION_INFO, info);
+        if (!info->size) {
+                vfio_dev_err(vdev, "Config Space has size zero?!");
+                return -EINVAL;
+        }       
+                        
+        /* Read standard headers and capabilities */
+        if (pread(vdev->fd, &pdev->hdr, sz, info->offset) != sz) {
+                vfio_dev_err(vdev, "failed to read %zd bytes of Config Space", sz);
+                return -EIO;
+        }       
+                        
+        /* Strip bit 7, that indicates multifunction */
+        pdev->hdr.header_type &= 0x7f;
+
+        if (pdev->hdr.header_type != PCI_HEADER_TYPE_NORMAL) {
+                vfio_dev_err(vdev, "unsupported header type %u",
+                             pdev->hdr.header_type);
+                return -EOPNOTSUPP;
+        }       
+
+        if (pdev->hdr.irq_pin)
+                pdev->irq_modes |= VFIO_PCI_IRQ_MODE_INTX;
+
+        vfio_pci_parse_caps(vdev);
+
+        return 0;
+}
+```
+To read the header information, it reads the vfio device file. However, before 
+actually reading the header information, it should know the offset of the header
+because the read function read information based on the provided offset. 
+Therefore, it first invokes ioctl to vfio pci device to retrieve information 
+including offset of the header from the kernel.
+
+**Kernel Side**
+```cpp
+static int vfio_pci_ioctl_get_region_info(struct vfio_pci_core_device *vdev,
+                                          struct vfio_region_info __user *arg)
+{
+        unsigned long minsz = offsetofend(struct vfio_region_info, offset);
+        struct pci_dev *pdev = vdev->pdev;
+        struct vfio_region_info info;
+        struct vfio_info_cap caps = { .buf = NULL, .size = 0 };
+        int i, ret;
+
+        if (copy_from_user(&info, arg, minsz))
+                return -EFAULT;
+
+        if (info.argsz < minsz)
+                return -EINVAL;
+
+        switch (info.index) {
+        case VFIO_PCI_CONFIG_REGION_INDEX:
+                info.offset = VFIO_PCI_INDEX_TO_OFFSET(info.index);
+                info.size = pdev->cfg_size;
+                info.flags = VFIO_REGION_INFO_FLAG_READ |
+                             VFIO_REGION_INFO_FLAG_WRITE;
+                break;
+        case VFIO_PCI_BAR0_REGION_INDEX ... VFIO_PCI_BAR5_REGION_INDEX:
+                info.offset = VFIO_PCI_INDEX_TO_OFFSET(info.index);
+                info.size = pci_resource_len(pdev, info.index);
+                if (!info.size) {
+                        info.flags = 0;
+                        break;
+                }
+
+                info.flags = VFIO_REGION_INFO_FLAG_READ |
+                             VFIO_REGION_INFO_FLAG_WRITE;
+                if (vdev->bar_mmap_supported[info.index]) {
+                        info.flags |= VFIO_REGION_INFO_FLAG_MMAP;
+                        if (info.index == vdev->msix_bar) {
+                                ret = msix_mmappable_cap(vdev, &caps);
+                                if (ret)
+                                        return ret;
+                        }
+                }
+
+                break;
+        case VFIO_PCI_ROM_REGION_INDEX: {
+                void __iomem *io;
+                size_t size;
+                u16 cmd;
+
+                info.offset = VFIO_PCI_INDEX_TO_OFFSET(info.index);
+                info.flags = 0;
+
+                /* Report the BAR size, not the ROM size */
+                info.size = pci_resource_len(pdev, info.index);
+                if (!info.size) {
+                        /* Shadow ROMs appear as PCI option ROMs */
+                        if (pdev->resource[PCI_ROM_RESOURCE].flags &
+                            IORESOURCE_ROM_SHADOW)
+                                info.size = 0x20000;
+                        else
+                                break;
+                }
+
+                /*
+                 * Is it really there?  Enable memory decode for implicit access
+                 * in pci_map_rom().
+                 */
+                cmd = vfio_pci_memory_lock_and_enable(vdev);
+                io = pci_map_rom(pdev, &size);
+                if (io) {
+                        info.flags = VFIO_REGION_INFO_FLAG_READ;
+                        pci_unmap_rom(pdev, io);
+                } else {
+                        info.size = 0;
+                }
+                vfio_pci_memory_unlock_and_restore(vdev, cmd);
+
+                break;
+        }
+        case VFIO_PCI_VGA_REGION_INDEX:
+                if (!vdev->has_vga)
+                        return -EINVAL;
+
+                info.offset = VFIO_PCI_INDEX_TO_OFFSET(info.index);
+                info.size = 0xc0000;
+                info.flags = VFIO_REGION_INFO_FLAG_READ |
+                             VFIO_REGION_INFO_FLAG_WRITE;
+
+                break;
+        default: {
+                struct vfio_region_info_cap_type cap_type = {
+                        .header.id = VFIO_REGION_INFO_CAP_TYPE,
+                        .header.version = 1
+                };
+                
+                if (info.index >= VFIO_PCI_NUM_REGIONS + vdev->num_regions)
+                        return -EINVAL;
+                info.index = array_index_nospec(
+                        info.index, VFIO_PCI_NUM_REGIONS + vdev->num_regions);
+                
+                i = info.index - VFIO_PCI_NUM_REGIONS;
+                
+                info.offset = VFIO_PCI_INDEX_TO_OFFSET(info.index);
+                info.size = vdev->region[i].size;
+                info.flags = vdev->region[i].flags;
+                
+                cap_type.type = vdev->region[i].type;
+                cap_type.subtype = vdev->region[i].subtype;
+                
+                ret = vfio_info_add_capability(&caps, &cap_type.header,
+                                               sizeof(cap_type));
+                if (ret)
+                        return ret;
+                
+                if (vdev->region[i].ops->add_capability) {
+                        ret = vdev->region[i].ops->add_capability(
+                                vdev, &vdev->region[i], &caps);
+                        if (ret)
+                                return ret;
+                }
+        }
+        }
+        
+        if (caps.size) {
+                info.flags |= VFIO_REGION_INFO_FLAG_CAPS;
+                if (info.argsz < sizeof(info) + caps.size) {
+                        info.argsz = sizeof(info) + caps.size;
+                        info.cap_offset = 0;
+                } else {
+                        vfio_info_cap_shift(&caps, sizeof(info));
+                        if (copy_to_user(arg + 1, caps.buf, caps.size)) {
+                                kfree(caps.buf);
+                                return -EFAULT;
+                        }
+                        info.cap_offset = sizeof(*arg);
+                }
+                
+                kfree(caps.buf);
+        }
+        
+        return copy_to_user(arg, &info, minsz) ? -EFAULT : 0;
+}
+```
+
+### Reading bar information through pread
+After retrieving the information of the pci device, it can now read the PCI 
+related information through the read. Let's see the how kernel allows the user 
+to read header information through read. 
+
+```cpp
+ssize_t vfio_pci_core_read(struct vfio_device *core_vdev, char __user *buf,
+                size_t count, loff_t *ppos)
+{       
+        struct vfio_pci_core_device *vdev =
+                container_of(core_vdev, struct vfio_pci_core_device, vdev);
+        
+        if (!count)     
+                return 0; 
+        
+        return vfio_pci_rw(vdev, buf, count, ppos, false);
+}       
+
+static ssize_t vfio_pci_rw(struct vfio_pci_core_device *vdev, char __user *buf,
+                           size_t count, loff_t *ppos, bool iswrite)
+{       
+        unsigned int index = VFIO_PCI_OFFSET_TO_INDEX(*ppos);
+        int ret;
+        
+        if (index >= VFIO_PCI_NUM_REGIONS + vdev->num_regions)
+                return -EINVAL;
+        
+        ret = pm_runtime_resume_and_get(&vdev->pdev->dev);
+        if (ret) {
+                pci_info_ratelimited(vdev->pdev, "runtime resume failed %d\n",
+                                     ret);
+                return -EIO;
+        }
+        
+        switch (index) {
+        case VFIO_PCI_CONFIG_REGION_INDEX:
+                ret = vfio_pci_config_rw(vdev, buf, count, ppos, iswrite);
+                break;
+        
+        case VFIO_PCI_ROM_REGION_INDEX:
+                if (iswrite)
+                        ret = -EINVAL;
+                else    
+                        ret = vfio_pci_bar_rw(vdev, buf, count, ppos, false);
+                break;
+        
+        case VFIO_PCI_BAR0_REGION_INDEX ... VFIO_PCI_BAR5_REGION_INDEX:
+                ret = vfio_pci_bar_rw(vdev, buf, count, ppos, iswrite);
+                break;
+        
+        case VFIO_PCI_VGA_REGION_INDEX:
+                ret = vfio_pci_vga_rw(vdev, buf, count, ppos, iswrite);
+                break;
+        
+        default:
+                index -= VFIO_PCI_NUM_REGIONS;
+                ret = vdev->region[index].ops->rw(vdev, buf,
+                                                   count, ppos, iswrite);
+                break;
+        }
+        
+        pm_runtime_put(&vdev->pdev->dev);
+        return ret;
+}
+```
+As described, based on the offset, switch allows user process to read different
+information of the pci device. 
+
+
+### Read BAR Information and locating BAR region at guest
+Lets go back to vfio_pci_configure information and see how it retrieves the 
+PCI BAR information.
+```cpp
+static int vfio_pci_configure_dev_regions(struct kvm *kvm,                      
+                                          struct vfio_device *vdev)             
+{                                                                               
+	......
+        for (i = VFIO_PCI_BAR0_REGION_INDEX; i <= VFIO_PCI_BAR5_REGION_INDEX; ++i) {
+                /* Ignore top half of 64-bit BAR */                             
+                if (is_64bit) {                                                 
+                        is_64bit = false;                                       
+                        continue;                                               
+                }                                                               
+                                                                                
+                ret = vfio_pci_configure_bar(kvm, vdev, i);                     
+                if (ret)                                                        
+                        return ret;                                             
+                                                                                
+                bar = pdev->hdr.bar[i];                                         
+                is_64bit = (bar & PCI_BASE_ADDRESS_SPACE) ==                    
+                           PCI_BASE_ADDRESS_SPACE_MEMORY &&                     
+                           bar & PCI_BASE_ADDRESS_MEM_TYPE_64;                  
+        }                                                     
+	......
+```
+
+
+```cpp
+static int vfio_pci_configure_bar(struct kvm *kvm, struct vfio_device *vdev,
+                                  size_t nr)
+{                       
+        int ret;
+        u32 bar;
+        size_t map_size;
+        struct vfio_pci_device *pdev = &vdev->pci;
+        struct vfio_region *region;
+
+        if (nr >= vdev->info.num_regions)
+                return 0;
+        
+        region = &vdev->regions[nr];
+        bar = pdev->hdr.bar[nr];
+        
+        region->vdev = vdev;
+        region->is_ioport = !!(bar & PCI_BASE_ADDRESS_SPACE_IO);
+        
+        ret = vfio_pci_get_region_info(vdev, nr, &region->info);
+        if (ret) 
+                return ret;
+                        
+        /* Ignore invalid or unimplemented regions */
+        if (!region->info.size)
+                return 0;
+                
+        if (pdev->irq_modes & VFIO_PCI_IRQ_MODE_MSIX) {
+                /* Trap and emulate MSI-X table */
+                if (nr == pdev->msix_table.bar) {
+                        region->guest_phys_addr = pdev->msix_table.guest_phys_addr;
+                        return 0;
+                } else if (nr == pdev->msix_pba.bar) {
+                        region->guest_phys_addr = pdev->msix_pba.guest_phys_addr;
+                        return 0;
+                }
+        }                                
+                
+        if (region->is_ioport) {
+                region->port_base = pci_get_io_port_block(region->info.size);
+        } else {
+                /* Grab some MMIO space in the guest */
+                map_size = ALIGN(region->info.size, PAGE_SIZE);
+                region->guest_phys_addr = pci_get_mmio_block(map_size);
+        }
+                        
+        return 0;
+}
+```
+
+```cpp
+static int vfio_pci_get_region_info(struct vfio_device *vdev, u32 index,
+                                    struct vfio_region_info *info)
+{
+        int ret;
+
+        *info = (struct vfio_region_info) {
+                .argsz = sizeof(*info),
+                .index = index,
+        };
+
+        ret = ioctl(vdev->fd, VFIO_DEVICE_GET_REGION_INFO, info);
+        if (ret) {
+                ret = -errno;
+                vfio_dev_err(vdev, "cannot get info for BAR %u", index);
+                return ret;
+        }
+
+        if (info->size && !is_power_of_two(info->size)) {
+                vfio_dev_err(vdev, "region is not power of two: 0x%llx",
+                                info->size);
+                return -EINVAL;
+        }
+
+        return 0;
+}
+```
+
+lkvm already knows the memory layout of the guest VM including where the PCI 
+address starts from and its size. Also, it has information of the PCI bar as a 
+result of ioctl to the pci-vfio driver. Therefore, It can easily retrieve the 
+guest physical address of the BAR register. 
+
+```cpp
+u32 pci_get_mmio_block(u32 size)
+{               
+        u32 block = ALIGN(mmio_blocks, size);
+        mmio_blocks = block + size; 
+        return block;
+}       
+```
+
+###
+Note that the retrieved BAR information is stored in the regions, not the bar.
+XXX: Why pdev->hdr_bar should be patched? Was it originally pointing to the 
+BAR of the host? and then it is patched to point to guest through this?
+
+```cpp
+static int vfio_pci_fixup_cfg_space(struct vfio_device *vdev)
+{               
+        int i;  
+        u64 base;       
+        ssize_t hdr_sz;
+        struct msix_cap *msix;
+        struct vfio_region_info *info;
+        struct vfio_pci_device *pdev = &vdev->pci; 
+        struct vfio_region *region;
+                        
+        /* Initialise the BARs */        
+        for (i = VFIO_PCI_BAR0_REGION_INDEX; i <= VFIO_PCI_BAR5_REGION_INDEX; ++i) {
+                if ((u32)i == vdev->info.num_regions)
+                        break;
+                
+                region = &vdev->regions[i];
+                /* Construct a fake reg to match what we've mapped. */
+                if (region->is_ioport) {
+                        base = (region->port_base & PCI_BASE_ADDRESS_IO_MASK) |
+                                PCI_BASE_ADDRESS_SPACE_IO;
+                } else {
+                        base = (region->guest_phys_addr &
+                                PCI_BASE_ADDRESS_MEM_MASK) |
+                                PCI_BASE_ADDRESS_SPACE_MEMORY;
+                }
+                           
+                pdev->hdr.bar[i] = base;
+        
+                if (!base)
+                        continue;
+        
+                pdev->hdr.bar_size[i] = region->info.size;
+        }       
+
+        /* I really can't be bothered to support cardbus. */
+        pdev->hdr.card_bus = 0;          
+
+        /*
+         * Nuke the expansion ROM for now. If we want to do this properly,
+         * we need to save its size somewhere and map into the guest.
+         */
+        pdev->hdr.exp_rom_bar = 0;
+
+        /* Plumb in our fake MSI-X capability, if we have it. */
+        msix = pci_find_cap(&pdev->hdr, PCI_CAP_ID_MSIX);
+        if (msix) {
+                /* Add a shortcut to the PBA region for the MMIO handler */
+                int pba_index = VFIO_PCI_BAR0_REGION_INDEX + pdev->msix_pba.bar;
+                u32 pba_bar_offset = msix->pba_offset & PCI_MSIX_PBA_OFFSET;
+
+                pdev->msix_pba.fd_offset = vdev->regions[pba_index].info.offset +
+                                           pba_bar_offset;
+
+                /* Tidy up the capability */
+                msix->table_offset &= PCI_MSIX_TABLE_BIR;
+                if (pdev->msix_table.bar == pdev->msix_pba.bar) {
+                        /* Keep the same offset as the MSIX cap. */
+                        pdev->msix_pba.bar_offset = pba_bar_offset;
+                } else {
+                        /* PBA is at the start of the BAR. */
+                        msix->pba_offset &= PCI_MSIX_PBA_BIR;
+                        pdev->msix_pba.bar_offset = 0;
+                }
+        }
+
+        /* Install our fake Configuration Space */
+        info = &vdev->regions[VFIO_PCI_CONFIG_REGION_INDEX].info;
+        /*
+         * We don't touch the extended configuration space, let's be cautious
+         * and not overwrite it all with zeros, or bad things might happen.
+         */
+        hdr_sz = PCI_DEV_CFG_SIZE_LEGACY;
+        if (pwrite(vdev->fd, &pdev->hdr, hdr_sz, info->offset) != hdr_sz) {
+                vfio_dev_err(vdev, "failed to write %zd bytes to Config Space",
+                             hdr_sz);
+                return -EIO;
+        }
+
+        /* Register callbacks for cfg accesses */
+        pdev->hdr.cfg_ops = (struct pci_config_operations) {
+                .read   = vfio_pci_cfg_read,
+                .write  = vfio_pci_cfg_write,
+        };
+
+        pdev->hdr.irq_type = IRQ_TYPE_LEVEL_HIGH;
+
+        return 0;
+}
+```
+
+Note that info structure utilized to get the offset field, passed to the pwrite,
+is a info that we have retrieved from the pci driver before [cite]. Therefore, 
+the pwrite will overwrite the header of the device. vfio_pci_fixup_cfg_space
+function updates the pdev->hdr based on the pci device information of the guest 
+before calling pwrite. For example, it patches the bar address as the guest 
+physical address (pdev->hdr.bar[i] = base;).
+\XX{I don't know why it needs to fixup pdev->hdr..}
+
+
+### Register BAR regions (map bar (hpa) to hva)
+We have located the BAR, however, it doesn't mean that the BAR has been mapped 
+to virtual address. To pass the address to QEMU to be utilized later for 
+creating memslot, the hva should be provided, and the bar should be mapped in 
+the host virtual address space. Let's see how to map the bar through another 
+interface call to vfio driver, particularly mmap.  
+
+
+```cpp
+static int vfio_pci_configure_dev_regions(struct kvm *kvm,                      
+                                          struct vfio_device *vdev)             
+{   
+	......
+        return pci__register_bar_regions(kvm, &pdev->hdr, vfio_pci_bar_activate,
+                                         vfio_pci_bar_deactivate, vdev); 
+}
+
+Note that the pdev->hdr is the updated header of the pci device reflecting info
+of the guest VM. 
+
+int pci__register_bar_regions(struct kvm *kvm, struct pci_device_header *pci_hdr,
+                              bar_activate_fn_t bar_activate_fn,
+                              bar_deactivate_fn_t bar_deactivate_fn, void *data)
+{               
+        int i, r;
+
+        assert(bar_activate_fn && bar_deactivate_fn);
+
+        pci_hdr->bar_activate_fn = bar_activate_fn;
+        pci_hdr->bar_deactivate_fn = bar_deactivate_fn;
+        pci_hdr->data = data;
+
+        for (i = 0; i < 6; i++) {
+                if (!pci_bar_is_implemented(pci_hdr, i))
+                        continue;
+        
+                assert(!pci_bar_is_active(pci_hdr, i));
+        
+                if (pci__bar_is_io(pci_hdr, i) &&
+                    pci__io_space_enabled(pci_hdr)) {
+                        r = pci_activate_bar(kvm, pci_hdr, i);
+                        if (r < 0)
+                                return r;
+                }
+        
+                if (pci__bar_is_memory(pci_hdr, i) &&
+                    pci__memory_space_enabled(pci_hdr)) {
+                        r = pci_activate_bar(kvm, pci_hdr, i);
+                        if (r < 0)
+                                return r;
+                }
+        }       
+        
+        return 0;
+}                       
+```
+
+```cpp
+static int pci_activate_bar(struct kvm *kvm, struct pci_device_header *pci_hdr,
+                            int bar_num)
+{
+        int r = 0;
+
+        if (pci_bar_is_active(pci_hdr, bar_num))
+                goto out;
+
+        r = pci_hdr->bar_activate_fn(kvm, pci_hdr, bar_num, pci_hdr->data);
+        if (r < 0) {
+                pci_dev_warn(pci_hdr, "Error activating emulation for BAR %d",
+                             bar_num);
+                goto out;
+        }
+        pci_hdr->bar_active[bar_num] = true;
+
+out:
+        return r;
+}       
+```
+
+```cpp
+static int vfio_pci_bar_activate(struct kvm *kvm,
+                                 struct pci_device_header *pci_hdr,
+                                 int bar_num, void *data)
+{       
+        struct vfio_device *vdev = data;
+        struct vfio_pci_device *pdev = &vdev->pci;
+        struct vfio_pci_msix_pba *pba = &pdev->msix_pba;
+        struct vfio_pci_msix_table *table = &pdev->msix_table;
+        struct vfio_region *region;
+        u32 bar_addr;
+        bool has_msix;
+        int ret;
+        
+        assert((u32)bar_num < vdev->info.num_regions);
+        
+        region = &vdev->regions[bar_num];
+        has_msix = pdev->irq_modes & VFIO_PCI_IRQ_MODE_MSIX;
+        
+        bar_addr = pci__bar_address(pci_hdr, bar_num);
+        if (pci__bar_is_io(pci_hdr, bar_num))
+                region->port_base = bar_addr;
+        else    
+                region->guest_phys_addr = bar_addr;
+        
+        if (has_msix && (u32)bar_num == table->bar) {
+                table->guest_phys_addr = region->guest_phys_addr;
+                ret = kvm__register_mmio(kvm, table->guest_phys_addr,
+                                         table->size, false,
+                                         vfio_pci_msix_table_access, pdev);
+                /*
+                 * The MSIX table and the PBA structure can share the same BAR,
+                 * but for convenience we register different regions for mmio
+                 * emulation. We want to we update both if they share the same
+                 * BAR.
+                 */
+                if (ret < 0 || table->bar != pba->bar)
+                        goto out;
+        }
+        
+        if (has_msix && (u32)bar_num == pba->bar) {
+                if (pba->bar == table->bar)
+                        pba->guest_phys_addr = table->guest_phys_addr + pba->bar_offset;
+                else    
+                        pba->guest_phys_addr = region->guest_phys_addr;
+                ret = kvm__register_mmio(kvm, pba->guest_phys_addr,
+                                         pba->size, false,
+                                         vfio_pci_msix_pba_access, pdev);
+                goto out;
+        }
+        
+        ret = vfio_map_region(kvm, vdev, region);
+out:    
+        return ret;
+}
+```
+
+```cpp
+int vfio_map_region(struct kvm *kvm, struct vfio_device *vdev,
+                    struct vfio_region *region)
+{       
+        void *base;
+        int ret, prot = 0;
+        /* KVM needs page-aligned regions */
+        u64 map_size = ALIGN(region->info.size, PAGE_SIZE);
+        
+        if (!(region->info.flags & VFIO_REGION_INFO_FLAG_MMAP))
+                return vfio_setup_trap_region(kvm, vdev, region);
+        
+        /*
+         * KVM_SET_USER_MEMORY_REGION will fail because the guest physical
+         * address isn't page aligned, let's emulate the region ourselves.
+         */
+        if (region->guest_phys_addr & (PAGE_SIZE - 1))
+                return kvm__register_mmio(kvm, region->guest_phys_addr,
+                                          region->info.size, false,
+                                          vfio_mmio_access, region);
+        
+        if (region->info.flags & VFIO_REGION_INFO_FLAG_READ)
+                prot |= PROT_READ;
+        if (region->info.flags & VFIO_REGION_INFO_FLAG_WRITE)
+                prot |= PROT_WRITE;
+        
+        base = mmap(NULL, region->info.size, prot, MAP_SHARED, vdev->fd,
+                    region->info.offset);
+        if (base == MAP_FAILED) {
+                /* TODO: support sparse mmap */
+                vfio_dev_warn(vdev, "failed to mmap region %u (0x%llx bytes), falling back to trapping",
+                         region->info.index, region->info.size);
+                return vfio_setup_trap_region(kvm, vdev, region);
+        }
+        region->host_addr = base;
+        
+        ret = kvm__register_dev_mem(kvm, region->guest_phys_addr, map_size,
+                                    region->host_addr);
+        if (ret) {
+                vfio_dev_err(vdev, "failed to register region with KVM");
+                return ret;
+        }
+        
+        return 0;
+}
+```
+Note that mmap is called to the vdev->fd. Let's see how the pci-device driver 
+allows this mapping. Also the mmap address will be stored in the region as a 
+host_addr field. This address will be passed to the kvm to generate memslot 
+later. 
+
+### mmap support for mapping bar resources from user
+To map the bar region from the user space, it should interface with the kernel. 
+Through the mmap call, it can ask the kernel driver to map the region for user
+space. 
+
+```cpp
+int vfio_pci_core_mmap(struct vfio_device *core_vdev, struct vm_area_struct *vma)
+{       
+        struct vfio_pci_core_device *vdev =
+                container_of(core_vdev, struct vfio_pci_core_device, vdev);
+        struct pci_dev *pdev = vdev->pdev;
+        unsigned int index;
+        u64 phys_len, req_len, pgoff, req_start;
+        int ret;
+                
+        index = vma->vm_pgoff >> (VFIO_PCI_OFFSET_SHIFT - PAGE_SHIFT);
+                             
+        if (index >= VFIO_PCI_NUM_REGIONS + vdev->num_regions)
+                return -EINVAL;
+        if (vma->vm_end < vma->vm_start)
+                return -EINVAL;
+        if ((vma->vm_flags & VM_SHARED) == 0)
+                return -EINVAL;
+        if (index >= VFIO_PCI_NUM_REGIONS) {
+                int regnum = index - VFIO_PCI_NUM_REGIONS;
+                struct vfio_pci_region *region = vdev->region + regnum;
+                
+                if (region->ops && region->ops->mmap &&
+                    (region->flags & VFIO_REGION_INFO_FLAG_MMAP))
+                        return region->ops->mmap(vdev, region, vma);
+                return -EINVAL;
+        }
+        if (index >= VFIO_PCI_ROM_REGION_INDEX)
+                return -EINVAL; 
+        if (!vdev->bar_mmap_supported[index])
+                return -EINVAL;
+        
+        phys_len = PAGE_ALIGN(pci_resource_len(pdev, index));
+        req_len = vma->vm_end - vma->vm_start;
+        pgoff = vma->vm_pgoff &
+                ((1U << (VFIO_PCI_OFFSET_SHIFT - PAGE_SHIFT)) - 1);
+        req_start = pgoff << PAGE_SHIFT;
+                                                   
+        if (req_start + req_len > phys_len)
+                return -EINVAL;
+
+        /*      
+         * Even though we don't make use of the barmap for the mmap,
+         * we need to request the region and the barmap tracks that.
+         */             
+        if (!vdev->barmap[index]) {
+                ret = pci_request_selected_regions(pdev,
+                                                   1 << index, "vfio-pci");
+                if (ret)
+                        return ret;
+        
+                vdev->barmap[index] = pci_iomap(pdev, index, 0);
+                if (!vdev->barmap[index]) {
+                        pci_release_selected_regions(pdev, 1 << index);
+                        return -ENOMEM;
+                }
+        }
+        
+        vma->vm_private_data = vdev;
+        vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+        vma->vm_pgoff = (pci_resource_start(pdev, index) >> PAGE_SHIFT) + pgoff;
+
+        /*
+         * See remap_pfn_range(), called from vfio_pci_fault() but we can't
+         * change vm_flags within the fault handler.  Set them now.
+         */
+        vma->vm_flags |= VM_IO | VM_PFNMAP | VM_DONTEXPAND | VM_DONTDUMP;
+        vma->vm_ops = &vfio_pci_mmap_ops;
+
+        return 0;
+}
+```
+Instead of generating the mapping here, usually achieved by remap_pfn_range,
+it registers the operation to generate mapping as the fault happens to the 
+memory through the user virtual address. Therefore, when the user process access 
+this region through the mapped virtual address, because the page has not been 
+actually mapped, it will raise the fault and invoke the allocated function. 
+
+```cpp
+static const struct vm_operations_struct vfio_pci_mmap_ops = {
+        .open = vfio_pci_mmap_open,
+        .close = vfio_pci_mmap_close,
+        .fault = vfio_pci_mmap_fault,
+};
+
+static vm_fault_t vfio_pci_mmap_fault(struct vm_fault *vmf)
+{
+        struct vm_area_struct *vma = vmf->vma;
+        struct vfio_pci_core_device *vdev = vma->vm_private_data;
+        struct vfio_pci_mmap_vma *mmap_vma;
+        vm_fault_t ret = VM_FAULT_NOPAGE;
+
+        mutex_lock(&vdev->vma_lock);
+        down_read(&vdev->memory_lock);
+                
+        /*              
+         * Memory region cannot be accessed if the low power feature is engaged
+         * or memory access is disabled.
+         */
+        if (vdev->pm_runtime_engaged || !__vfio_pci_memory_enabled(vdev)) {
+                ret = VM_FAULT_SIGBUS;
+                goto up_out;
+        }       
+                
+        /*
+         * We populate the whole vma on fault, so we need to test whether
+         * the vma has already been mapped, such as for concurrent faults
+         * to the same vma.  io_remap_pfn_range() will trigger a BUG_ON if
+         * we ask it to fill the same range again.
+         */
+        list_for_each_entry(mmap_vma, &vdev->vma_list, vma_next) {
+                if (mmap_vma->vma == vma)
+                        goto up_out;
+        }
+        
+        if (io_remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff,
+                               vma->vm_end - vma->vm_start,
+                               vma->vm_page_prot)) {
+                ret = VM_FAULT_SIGBUS;
+                zap_vma_ptes(vma, vma->vm_start, vma->vm_end - vma->vm_start);
+                goto up_out;
+        }
+        
+        if (__vfio_pci_add_vma(vdev, vma)) {
+                ret = VM_FAULT_OOM;
+                zap_vma_ptes(vma, vma->vm_start, vma->vm_end - vma->vm_start);
+        }       
+        
+up_out: 
+        up_read(&vdev->memory_lock);
+        mutex_unlock(&vdev->vma_lock);
+        return ret;
+}       
+```
+
+
+
+```cpp
+static inline int kvm__register_dev_mem(struct kvm *kvm, u64 guest_phys,
+                                        u64 size, void *userspace_addr)
+{
+        return kvm__register_mem(kvm, guest_phys, size, userspace_addr,
+                                 KVM_MEM_TYPE_DEVICE);
+}
+```
+
+```cpp
+int kvm__register_mem(struct kvm *kvm, u64 guest_phys, u64 size,
+                      void *userspace_addr, enum kvm_mem_type type)
+{
+        struct kvm_userspace_memory_region mem;
+        struct kvm_mem_bank *merged = NULL;
+        struct kvm_mem_bank *bank;      
+        struct list_head *prev_entry;   
+        u32 slot;
+        u32 flags = 0;                  
+        int ret;
+        
+        mutex_lock(&kvm->mem_banks_lock);
+        /* Check for overlap and find first empty slot. */
+        slot = 0;
+        prev_entry = &kvm->mem_banks;
+        list_for_each_entry(bank, &kvm->mem_banks, list) {
+                u64 bank_end = bank->guest_phys_addr + bank->size - 1;
+                u64 end = guest_phys + size - 1;
+                if (guest_phys > bank_end || end < bank->guest_phys_addr) {
+                        /*
+                         * Keep the banks sorted ascending by slot, so it's
+                         * easier for us to find a free slot.
+                         */
+                        if (bank->slot == slot) {
+                                slot++;
+                                prev_entry = &bank->list;
+                        }
+                        continue;
+                }
+        
+                /* Merge overlapping reserved regions */
+                if (bank->type == KVM_MEM_TYPE_RESERVED &&
+                    type == KVM_MEM_TYPE_RESERVED) {
+                        bank->guest_phys_addr = min(bank->guest_phys_addr, guest_phys);
+                        bank->size = max(bank_end, end) - bank->guest_phys_addr + 1;
+        
+                        if (merged) {
+                                /*
+                                 * This is at least the second merge, remove
+                                 * previous result.
+                                 */
+                                list_del(&merged->list);
+                                free(merged);
+                        }
+                
+                        guest_phys = bank->guest_phys_addr;
+                        size = bank->size;
+                        merged = bank;
+        
+                        /* Keep checking that we don't overlap another region */
+                        continue;
+                }       
+        
+                pr_err("%s region [%llx-%llx] would overlap %s region [%llx-%llx]",
+                       kvm_mem_type_to_string(type), guest_phys, guest_phys + size - 1,
+                       kvm_mem_type_to_string(bank->type), bank->guest_phys_addr,
+                       bank->guest_phys_addr + bank->size - 1);
+        
+                ret = -EINVAL;
+                goto out;
+        }       
+                
+        if (merged) {
+                ret = 0;
+                goto out;
+        }
+
+        bank = malloc(sizeof(*bank));
+        if (!bank) {
+                ret = -ENOMEM;
+                goto out;
+        }
+
+        INIT_LIST_HEAD(&bank->list);
+        bank->guest_phys_addr           = guest_phys;
+        bank->host_addr                 = userspace_addr;
+        bank->size                      = size;
+        bank->type                      = type;
+        bank->slot                      = slot;
+
+        if (type & KVM_MEM_TYPE_READONLY)
+                flags |= KVM_MEM_READONLY;
+
+        if (type != KVM_MEM_TYPE_RESERVED) {
+                mem = (struct kvm_userspace_memory_region) {
+                        .slot                   = slot,
+                        .flags                  = flags,
+                        .guest_phys_addr        = guest_phys,
+                        .memory_size            = size,
+                        .userspace_addr         = (unsigned long)userspace_addr,
+                };
+
+                ret = ioctl(kvm->vm_fd, KVM_SET_USER_MEMORY_REGION, &mem);
+                if (ret < 0) {
+                        ret = -errno;
+                        goto out;
+                }
+        }
+
+        list_add(&bank->list, prev_entry);
+        kvm->mem_slots++;
+        ret = 0;
+
+out:
+        mutex_unlock(&kvm->mem_banks_lock);
+        return ret;
+}
+```
+
+
+### KVM module side
+
+
+
+```cpp
+static long kvm_vm_ioctl(struct file *filp,
+                           unsigned int ioctl, unsigned long arg)
+{
+        struct kvm *kvm = filp->private_data;
+        void __user *argp = (void __user *)arg;
+        int r;
+
+        if (kvm->mm != current->mm || kvm->vm_dead)
+                return -EIO;
+        switch (ioctl) {
+        case KVM_CREATE_VCPU:
+                r = kvm_vm_ioctl_create_vcpu(kvm, arg);
+                break;
+        case KVM_ENABLE_CAP: {
+                struct kvm_enable_cap cap;
+
+                r = -EFAULT;
+                if (copy_from_user(&cap, argp, sizeof(cap)))
+                        goto out;
+                r = kvm_vm_ioctl_enable_cap_generic(kvm, &cap);
+                break;
+        }
+        case KVM_SET_USER_MEMORY_REGION: {
+                struct kvm_userspace_memory_region kvm_userspace_mem;
+
+                r = -EFAULT;
+                if (copy_from_user(&kvm_userspace_mem, argp,
+                                                sizeof(kvm_userspace_mem)))
+                        goto out;
+
+                r = kvm_vm_ioctl_set_memory_region(kvm, &kvm_userspace_mem);
+                break;
+        }
+	......
+```
+
+```cpp
+static int kvm_vm_ioctl_set_memory_region(struct kvm *kvm,
+                                          struct kvm_userspace_memory_region *mem)
+{       
+        if ((u16)mem->slot >= KVM_USER_MEM_SLOTS)
+                return -EINVAL;
+        
+        return kvm_set_memory_region(kvm, mem);
+}
+
+int kvm_set_memory_region(struct kvm *kvm,
+                          const struct kvm_userspace_memory_region *mem)
+{
+        int r;            
+        
+        mutex_lock(&kvm->slots_lock);
+        r = __kvm_set_memory_region(kvm, mem);
+        mutex_unlock(&kvm->slots_lock);
+        return r;
+}       
+EXPORT_SYMBOL_GPL(kvm_set_memory_region);
+```
+
+
+```cpp
+int __kvm_set_memory_region(struct kvm *kvm,
+                            const struct kvm_userspace_memory_region *mem)
+{
+        struct kvm_memory_slot *old, *new;
+        struct kvm_memslots *slots;
+        enum kvm_mr_change change;
+        unsigned long npages;
+        gfn_t base_gfn;
+        int as_id, id;
+        int r;
+
+        r = check_memory_region_flags(mem);
+        if (r)
+                return r;
+
+        as_id = mem->slot >> 16;
+        id = (u16)mem->slot;
+
+        /* General sanity checks */
+        if ((mem->memory_size & (PAGE_SIZE - 1)) ||
+            (mem->memory_size != (unsigned long)mem->memory_size))
+                return -EINVAL;
+        if (mem->guest_phys_addr & (PAGE_SIZE - 1))
+                return -EINVAL;
+        /* We can read the guest memory with __xxx_user() later on. */
+        if ((mem->userspace_addr & (PAGE_SIZE - 1)) ||
+            (mem->userspace_addr != untagged_addr(mem->userspace_addr)) ||
+             !access_ok((void __user *)(unsigned long)mem->userspace_addr,
+                        mem->memory_size))
+                return -EINVAL;
+        if (as_id >= KVM_ADDRESS_SPACE_NUM || id >= KVM_MEM_SLOTS_NUM)
+                return -EINVAL;
+        if (mem->guest_phys_addr + mem->memory_size < mem->guest_phys_addr)
+                return -EINVAL;
+        if ((mem->memory_size >> PAGE_SHIFT) > KVM_MEM_MAX_NR_PAGES)
+                return -EINVAL;
+
+        slots = __kvm_memslots(kvm, as_id);
+
+        /*
+         * Note, the old memslot (and the pointer itself!) may be invalidated
+         * and/or destroyed by kvm_set_memslot().
+         */
+        old = id_to_memslot(slots, id);
+
+        if (!mem->memory_size) {
+                if (!old || !old->npages)
+                        return -EINVAL;
+
+                if (WARN_ON_ONCE(kvm->nr_memslot_pages < old->npages))
+                        return -EIO;
+
+                return kvm_set_memslot(kvm, old, NULL, KVM_MR_DELETE);
+        }
+
+        base_gfn = (mem->guest_phys_addr >> PAGE_SHIFT);
+        npages = (mem->memory_size >> PAGE_SHIFT);
+
+        if (!old || !old->npages) {
+                change = KVM_MR_CREATE;
+
+                /*
+                 * To simplify KVM internals, the total number of pages across
+                 * all memslots must fit in an unsigned long.
+                 */
+                if ((kvm->nr_memslot_pages + npages) < kvm->nr_memslot_pages)
+                        return -EINVAL;
+        } else { /* Modify an existing slot. */
+                if ((mem->userspace_addr != old->userspace_addr) ||
+                    (npages != old->npages) ||
+                    ((mem->flags ^ old->flags) & KVM_MEM_READONLY))
+                        return -EINVAL;
+
+                if (base_gfn != old->base_gfn)
+                        change = KVM_MR_MOVE;
+                else if (mem->flags != old->flags)
+                        change = KVM_MR_FLAGS_ONLY;
+                else /* Nothing to change. */
+                        return 0;
+        }
+
+        if ((change == KVM_MR_CREATE || change == KVM_MR_MOVE) &&
+            kvm_check_memslot_overlap(slots, id, base_gfn, base_gfn + npages))
+                return -EEXIST;
+
+        /* Allocate a slot that will persist in the memslot. */
+        new = kzalloc(sizeof(*new), GFP_KERNEL_ACCOUNT);
+        if (!new)
+                return -ENOMEM;
+
+        new->as_id = as_id;
+        new->id = id;
+        new->base_gfn = base_gfn;
+        new->npages = npages;
+        new->flags = mem->flags;
+        new->userspace_addr = mem->userspace_addr;
+
+        r = kvm_set_memslot(kvm, old, new, change);
+        if (r)
+                kfree(new);
+        return r;
+}
+```
+
+
+```cpp
+static inline u32 pci__bar_address(struct pci_device_header *pci_hdr, int bar_num)
+{
+        return __pci__bar_address(pci_hdr->bar[bar_num]);
+}
+
+static inline u32 __pci__bar_address(u32 bar)
+{
+        if (__pci__bar_is_io(bar))
+                return bar & PCI_BASE_ADDRESS_IO_MASK;
+        return bar & PCI_BASE_ADDRESS_MEM_MASK;
 }
 
 
