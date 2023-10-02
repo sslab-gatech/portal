@@ -230,6 +230,31 @@ Host can also easily tell which IPA the faultin address belongs to because
 untrusted API is mapped to upper half of the IPA and the trusted is mapped to 
 the lower half. 
 
+```cpp
+static inline bool realm_is_addr_protected(struct realm *realm,
+                                           unsigned long addr)
+{       
+        unsigned int ia_bits = realm->ia_bits;
+        
+        return !(addr & ~(BIT(ia_bits - 1) - 1));
+}       
+```
+
+
+```cpp
+#define S2TTE_ATTRS     (S2TTE_MEMATTR_FWB_NORMAL_WB | S2TTE_AP_RW | \
+                        S2TTE_SH_IS | S2TTE_AF)
+
+#define S2TTE_PAGE      (S2TTE_ATTRS | S2TTE_L3_PAGE)
+#define S2TTE_PAGE_NS   (S2TTE_NS | S2TTE_XN | S2TTE_AF | S2TTE_L3_PAGE)
+```
+
+The biggest difference between secure IPA valid page and ns IPA valid page is 
+NS bit. Also, the shareability and writeback settings are enforced for secure
+IPA pages. \TODO{need to check what are the guarantees of these three flags 
+S2TTE_MEMATTR_FWB_NORMAL_WB, S2TTE_AP_RW, and S2TTE_SH_IS for the secure IPA}.
+
+
 ### Map to untrusted IPA
 ```cpp
 int realm_map_non_secure(struct realm *realm,
@@ -281,36 +306,26 @@ int realm_map_non_secure(struct realm *realm,
 }
 ```
 
-### Map to secure IPA
+### Map to trusted IPA 
 ```cpp
-static inline bool realm_is_addr_protected(struct realm *realm,
-                                           unsigned long addr)
-{       
-        unsigned int ia_bits = realm->ia_bits;
-        
-        return !(addr & ~(BIT(ia_bits - 1) - 1));
-}       
-```
-
-```cpp
-int realm_map_non_secure(struct realm *realm,
-                         unsigned long ipa, 
-                         struct page *page,
-                         unsigned long map_size,
-                         struct kvm_mmu_memory_cache *memcache)
+int realm_map_protected(struct realm *realm,
+                        unsigned long hva,
+                        unsigned long base_ipa,
+                        struct page *dst_page,
+                        unsigned long map_size,
+                        struct kvm_mmu_memory_cache *memcache)
 {
+        phys_addr_t dst_phys = page_to_phys(dst_page);
         phys_addr_t rd = virt_to_phys(realm->rd);
-        int map_level;    
-        int ret = 0;      
-        unsigned long desc = page_to_phys(page) |
-                             PTE_S2_MEMATTR(MT_S2_FWB_NORMAL) |
-                             /* FIXME: Read+Write permissions for now */
-                             (3 << 6) |
-                             PTE_SHARED;
-        
+        unsigned long phys = dst_phys;
+        unsigned long ipa = base_ipa;
+        unsigned long size;
+        int map_level;
+        int ret = 0;
+
         if (WARN_ON(!IS_ALIGNED(ipa, map_size)))
                 return -EINVAL;
-        
+
         switch (map_size) {
         case PAGE_SIZE:
                 map_level = 3;
@@ -322,40 +337,98 @@ int realm_map_non_secure(struct realm *realm,
                 return -EINVAL;
         }
 
-        ret = rmi_rtt_map_unprotected(rd, ipa, map_level, desc);
-
-        if (RMI_RETURN_STATUS(ret) == RMI_ERROR_RTT) {
-                /* Create missing RTTs and retry */
-                int level = RMI_RETURN_INDEX(ret);
-
-                ret = realm_create_rtt_levels(realm, ipa, level, map_level,
-                                              memcache);
-                if (WARN_ON(ret))
-                        return -ENXIO;
-
-                ret = rmi_rtt_map_unprotected(rd, ipa, map_level, desc);
+        if (map_level < RME_RTT_MAX_LEVEL) {
+                /*
+                 * A temporary RTT is needed during the map, precreate it,
+                 * however if there is an error (e.g. missing parent tables)
+                 * this will be handled below.
+                 */
+                realm_create_rtt_levels(realm, ipa, map_level,
+                                        RME_RTT_MAX_LEVEL, memcache);
         }
+
+        for (size = 0; size < map_size; size += PAGE_SIZE) {
+                if (rmi_granule_delegate(phys)) {
+                        struct rtt_entry rtt;
+
+                        /*
+                         * It's possible we raced with another VCPU on the same
+                         * fault. If the entry exists and matches then exit
+                         * early and assume the other VCPU will handle the
+                         * mapping.
+                         */
+                        if (rmi_rtt_read_entry(rd, ipa, RME_RTT_MAX_LEVEL, &rtt))
+                                goto err;
+
+                        // FIXME: For a block mapping this could race at level
+                        // 2 or 3...
+                        if (WARN_ON((rtt.walk_level != RME_RTT_MAX_LEVEL ||
+                                     rtt.state != RMI_ASSIGNED ||
+                                     rtt.desc != phys))) {
+                                goto err;
+                        }
+
+                        return 0;
+                }
+
+                ret = rmi_data_create_unknown(phys, rd, ipa);
+
+                if (RMI_RETURN_STATUS(ret) == RMI_ERROR_RTT) {
+                        /* Create missing RTTs and retry */
+                        int level = RMI_RETURN_INDEX(ret);
+
+                        ret = realm_create_rtt_levels(realm, ipa, level,
+                                                      RME_RTT_MAX_LEVEL,
+                                                      memcache);
+                        WARN_ON(ret);
+                        if (ret)
+                                goto err_undelegate;
+
+                        ret = rmi_data_create_unknown(phys, rd, ipa);
+                }
+                WARN_ON(ret);
+
+                if (ret)
+                        goto err_undelegate;
+
+                phys += PAGE_SIZE;
+                ipa += PAGE_SIZE;
+        }
+
+        if (map_size == RME_L2_BLOCK_SIZE)
+                ret = fold_rtt(rd, base_ipa, map_level, realm);
         if (WARN_ON(ret))
-                return -ENXIO;
+                goto err;
 
         return 0;
+
+err_undelegate:
+        if (WARN_ON(rmi_granule_undelegate(phys))) {
+                /* Page can't be returned to NS world so is lost */
+                get_page(phys_to_page(phys));
+        }
+err:
+        while (size > 0) {
+                phys -= PAGE_SIZE;
+                size -= PAGE_SIZE;
+                ipa -= PAGE_SIZE;
+
+                rmi_data_destroy(rd, ipa);
+
+                if (WARN_ON(rmi_granule_undelegate(phys))) {
+                        /* Page can't be returned to NS world so is lost */
+                        get_page(phys_to_page(phys));
+                }
+        }
+        return -ENXIO;
 }
-
-
-
 ```
+The most noticeable difference compared with generating untrusted ipa mapping is
+it requires the physical page that will be mapped should be delegated to the 
+realm before calling RMI to generate mapping to that physical page. The big 
+difference is made from whether the page is delegated to the realm or not, which
+makes the GPT configuration changes restricting access control for the page as
+a result. 
 
-
-
-```cpp
-#define S2TTE_ATTRS     (S2TTE_MEMATTR_FWB_NORMAL_WB | S2TTE_AP_RW | \
-                        S2TTE_SH_IS | S2TTE_AF)
-
-#define S2TTE_PAGE      (S2TTE_ATTRS | S2TTE_L3_PAGE)
-#define S2TTE_PAGE_NS   (S2TTE_NS | S2TTE_XN | S2TTE_AF | S2TTE_L3_PAGE)
-```
-
-The biggest difference between secure IPA valid page and ns IPA valid page is 
-NS bit. Also, the shareability and writeback settings are enforced for secure
-IPA pages. \TODO{need to check what are the guarantees of these three flags 
-S2TTE_MEMATTR_FWB_NORMAL_WB, S2TTE_AP_RW, and S2TTE_SH_IS for the secure IPA}.
+Also it utilize different RMI SMC_RMM_DATA_CREATE_UNKNOWN instead of 
+SMC_RMM_RTT_MAP_UNPROTECTED to generate mapping in the RTT. 

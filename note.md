@@ -496,10 +496,12 @@ out_unlock:
 }
 ```
 
-The goal of attach function are 1. Generate page table for the context, 2. Spawn
-Context Descriptor (CD), 3. Set up the stream table entry. The first and second
-will be handled by the arm_smmu_domain_finalise function, and the last will be 
-done by arm_smmu_install_ste_for_dev.
+The goal of attach function are 
+- Generate page table for the context
+- Spawn Context Descriptor (CD)
+- Set up the stream table entry. 
+The first and second will be handled by the **arm_smmu_domain_finalise** and the
+last will be done by **arm_smmu_install_ste_for_dev**.
 
 ```cpp
 static int arm_smmu_domain_finalise(struct iommu_domain *domain,

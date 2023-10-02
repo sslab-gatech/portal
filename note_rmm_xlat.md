@@ -1246,6 +1246,7 @@ parent RTT page accordingly. Let's see!
                 assert(false);
         }
 ```
+
 Based on the parent RTT page type, it updates the new RTT page! Because the 
 RTT page that needs to be inserted in the stage2 page table is also the array 
 of RTT or last entries based on the page table level, all of its entries should 
@@ -1270,7 +1271,7 @@ or RMI_DATA_DESTROY.
 After the update, it first updates the granule of the new RTT page to 
 GRANULE_STATE_RTT because it will be used as RTT page! Also, it sets up flag 
 on the rtt_addr which is the physical address of the RTT to indicate that this 
-page is used as s2tte table in which level, not entry. Finally it updates the 
+page is used as s2tte table in what level, not entry. Finally it updates the 
 parent_s2tt so that the next level RTT connection can be established. 
 
 

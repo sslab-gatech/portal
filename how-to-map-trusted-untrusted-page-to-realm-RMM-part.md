@@ -256,7 +256,7 @@ any physical address that is mapped to the IPA through the stage 2 page table.
 It means that this function just initialize the st2tte entry used for mapping 
 the passed IPA to any physical address. 
 
-### Generate data (associate the IPA to HPA)
+### Generate data (associate the IPA to HPA **for trusted pages**)
 Initializing RIPAS doesn't mean that the stage 2 page tables are all set to 
 translate the IPA to specific HPA. Therefore, to allow the Realm to access the 
 actual memory as a result of stage2 page table walking of the MMU, the PA should
@@ -293,10 +293,61 @@ map_addr. If host wants to copy the code/data from the NS memory to the target
 page belong to Realm PAS, it passes the src_addr parameter to let RMM know the 
 address of the page where its content should be copied from. There is another 
 RMI, SMC_RMM_DATA_CREATE_UNKNOWN, which doesn't involve any copy but establish 
-the IPA to PA mapping. 
+the IPA to PA mapping. Therefore it does require the granule for the copy page.
+Let's see how data_create function works!
+
 
 
 ```cpp
+static unsigned long data_create(unsigned long data_addr,
+                                 unsigned long rd_addr,
+                                 unsigned long map_addr,
+                                 struct granule *g_src,
+                                 unsigned long flags)
+{       
+        struct granule *g_data;
+        struct granule *g_rd;
+        struct granule *g_table_root;
+        struct rd *rd;
+        struct rtt_walk wi;
+        unsigned long s2tte, *s2tt;
+        enum ripas ripas;
+        enum granule_state new_data_state = GRANULE_STATE_DELEGATED;
+        unsigned long ipa_bits;
+        unsigned long ret;
+        int __unused meas_ret;
+        int sl;
+        
+        if (!find_lock_two_granules(data_addr,
+                                    GRANULE_STATE_DELEGATED,
+                                    &g_data,
+                                    rd_addr,
+                                    GRANULE_STATE_RD,
+                                    &g_rd)) {
+                return RMI_ERROR_INPUT;
+        }
+        
+        rd = granule_map(g_rd, SLOT_RD);
+        
+        ret = (g_src != NULL) ?
+                validate_data_create(map_addr, rd) :
+                validate_data_create_unknown(map_addr, rd);
+        
+        if (ret != RMI_SUCCESS) {
+                goto out_unmap_rd;
+        }
+        
+        g_table_root = rd->s2_ctx.g_rtt;
+        sl = realm_rtt_starting_level(rd);
+        ipa_bits = realm_ipa_bits(rd);
+        granule_lock(g_table_root, GRANULE_STATE_RTT);
+        rtt_walk_lock_unlock(g_table_root, sl, ipa_bits,
+                             map_addr, RTT_PAGE_LEVEL, &wi);
+        if (wi.last_level != RTT_PAGE_LEVEL) {
+                ret = pack_return_code(RMI_ERROR_RTT, wi.last_level);
+                goto out_unlock_ll_table;
+        }
+
         s2tt = granule_map(wi.g_llt, SLOT_RTT);
         s2tte = s2tte_read(&s2tt[wi.index]);
         if (!s2tte_is_unassigned(s2tte)) {
@@ -305,23 +356,70 @@ the IPA to PA mapping.
         }    
 
         ripas = s2tte_get_ripas(s2tte);
+	......
 ```
-It walks the stage2 page table and locate the S2TTE translating the passed IPA 
-to the HPA. First it will check HIPAS of the S2TTE entry to confirm it is not
-ASSIGNED yet. Also, it retrieves RIPAS of the S2TTE.
-
+First it need to walk the stage2 page table and locate the S2TTE translating the
+passed IPA to the HPA. This is done by rtt_walk_lock_unlock function. For the 
+details of internal page walking for s2tte, refer to [[]]. The purpose of the 
+walk is to retrieve the parent rtt entry of the target rtt so that it can 
+validate if the mapping operation is permitted and establish the mapping. To
+confirm the mapping has not been established, it checks HIPAS of the s2tte. 
 
 ```cpp
+static unsigned long data_create(unsigned long data_addr,
+                                 unsigned long rd_addr,
+                                 unsigned long map_addr,
+                                 struct granule *g_src,
+                                 unsigned long flags)
+	......
+        if (g_src != NULL) {
+                bool ns_access_ok;
+                void *data = granule_map(g_data, SLOT_DELEGATED);
+
+                ns_access_ok = ns_buffer_read(SLOT_NS, g_src, 0U,
+                                              GRANULE_SIZE, data);
+
+                if (!ns_access_ok) {
+                        /*
+                         * Some data may be copied before the failure. Zero
+                         * g_data granule as it will remain in delegated state.
+                         */
+                        (void)memset(data, 0, GRANULE_SIZE);
+                        buffer_unmap(data);
+                        ret = RMI_ERROR_INPUT;
+                        goto out_unmap_ll_table;
+                }
+                
+                
+                data_granule_measure(rd, data, map_addr, flags);
+        
+                buffer_unmap(data);
+        }
+```
+If the RMI request was the SMC_RMM_DATA_CREATE, then it should copy the data 
+from the host pages to the destination page and measure it for attestation. 
+Whether we need the copy operation or not, we need the last level entry of the 
+RTT to establish the mapping. Let's see how the last page for the mapping is 
+generated. 
+
+```cpp
+static unsigned long data_create(unsigned long data_addr,
+                                 unsigned long rd_addr,
+                                 unsigned long map_addr,
+                                 struct granule *g_src,
+                                 unsigned long flags)
+	......
         s2tte = (ripas == RIPAS_EMPTY) ?
                 s2tte_create_assigned_empty(data_addr, RTT_PAGE_LEVEL) :
                 s2tte_create_valid(data_addr, RTT_PAGE_LEVEL);
 ```
 
-Based on the current RIPAS of the S2TTE, it will call different functions to 
-update S2TTE. Note that both functions require data_addr which is the HPA addr
-that should be mapped to the IPA through the current S2TTE. Because the RIPAS 
-can be set as part of the S2TTE bits, these two functions will configure S2TTE
-with the proper address and different RIPAS.
+Note that the s2tte points to the leaf page of the s2tt connecting the realm
+ipa to host provided delegated page. Based on the current RIPAS of the S2TTE, it
+will call different functions to update last page. Note that both functions 
+require data_addr which is the HPA addr that should be mapped to the IPA through 
+the S2TTE. The major difference of two different s2tte is HIPAS and RIPAS.
+Note that the RIPAS can be set as part of the S2TTE bits.
 
 ```cpp
 /*                      
@@ -336,14 +434,13 @@ unsigned long s2tte_create_assigned_empty(unsigned long pa, long level)
 }       
 ```
 
-When the current RIPAS is RIPAS_EMPTY, then it means that smc_rtt_init_ripas 
-function was not invoked before the DATA_CREATE RMI call for this S2TTE. 
+When the current RIPAS is RIPAS_EMPTY, then it means that **smc_rtt_init_ripas 
+function was not invoked** before the DATA_CREATE RMI call for this S2TTE. 
 Therefore, although the HIPAS will be changed from the UNASSIGNED to ASSIGNED
 as a result of DATA_CREATE, it will not be a valid mapping to be used inside 
 the REALM. 
 
-
-```
+```cpp
 /*      
  * Creates a page or block s2tte for a Protected IPA, with output address @pa.
  */     
@@ -357,7 +454,6 @@ unsigned long s2tte_create_valid(unsigned long pa, long level)
         return (pa | S2TTE_BLOCK);
 }
 ```
-
 In contrast with the previous case, if the smc_rtt_init_ripas has been called 
 for the selected S2TTE before, by changing the HIPAS from UNASSIGNED to ASSIGNED
 the addresses mapped through this S2TTE can be valid and safe to be used inside
@@ -372,6 +468,9 @@ the REALM.
 
 To allow the accesses inside the REALM, it sets up lower memory attribute of the 
 S2TTE by set up relevant flags (e.g., Access Permission (AP), Access Flag (AF)).
+Therefore, when the realm tries to access the page mapped through the 
+s2tte_create_assigned_empty, then it raise the execution fault because the flags
+set for that page preventing the MMU from accessing the page. 
 
 ## Map NS-IPA
 Non-secure pages are mapped through the stage 2 page table secured by the RMM.

@@ -639,8 +639,8 @@ static int __iommu_take_dma_ownership(struct iommu_group *group, void *owner)
 
 
 ## Associate IOMMU to VFIO group
-The userspace can configure the IOMMU for the container by invoking 
-VFIO_SET_IOMMU ioctl  on the file descriptor of the container. 
+The userspace can **configure the IOMMU for the container** by invoking 
+VFIO_SET_IOMMU ioctl on the file descriptor of the container. 
 
 ```cpp
 static long vfio_ioctl_set_iommu(struct vfio_container *container,
@@ -710,8 +710,55 @@ static long vfio_ioctl_set_iommu(struct vfio_container *container,
         return ret;
 }
 ```
-It iterates the list of registered drivers in the iommu_drivers_list and \XXX
+It iterates the list of registered drivers in the **iommu_drivers_list** of the 
+vfio and \XXX.
+Therefore, understanding which device driver is registers in the list is 
+important to understand how the vfio_ioctl_set_iommu call initialize IOMMU 
+drivers for the vfio group. 
 
+### vfio_iommu_type1 for iommu 
+There is only registered driver in the iommu_drivers_list unless the noiommu is
+used. 
+
+**vfio_iommu_type1.c**
+```cpp
+static int __init vfio_iommu_type1_init(void)
+{
+        return vfio_register_iommu_driver(&vfio_iommu_driver_ops_type1);
+}       
+
+int vfio_register_iommu_driver(const struct vfio_iommu_driver_ops *ops)
+{       
+        struct vfio_iommu_driver *driver, *tmp;
+
+        if (WARN_ON(!ops->register_device != !ops->unregister_device))
+                return -EINVAL;
+        
+        driver = kzalloc(sizeof(*driver), GFP_KERNEL);
+        if (!driver)            
+                return -ENOMEM; 
+        
+        driver->ops = ops;      
+        
+        mutex_lock(&vfio.iommu_drivers_lock);
+        
+        /* Check for duplicates */
+        list_for_each_entry(tmp, &vfio.iommu_drivers_list, vfio_next) {
+                if (tmp->ops == ops) {
+                        mutex_unlock(&vfio.iommu_drivers_lock);
+                        kfree(driver);
+                        return -EINVAL;
+                }
+        }
+
+        list_add(&driver->vfio_next, &vfio.iommu_drivers_list);
+
+        mutex_unlock(&vfio.iommu_drivers_lock);
+
+        return 0;
+}       
+```
+Note that the current iommu driver is added to the iommu_drivers_list of vfio.
 
 ```cpp
 static const struct vfio_iommu_driver_ops vfio_iommu_driver_ops_type1 = {
@@ -730,96 +777,10 @@ static const struct vfio_iommu_driver_ops vfio_iommu_driver_ops_type1 = {
         .group_iommu_domain     = vfio_iommu_type1_group_iommu_domain,
         .notify                 = vfio_iommu_type1_notify,
 };
-
-static int __init vfio_iommu_type1_init(void)
-{
-        return vfio_register_iommu_driver(&vfio_iommu_driver_ops_type1);
-}       
 ```
 
-```cpp
-/*
- * IOMMU driver registration
- */
-int vfio_register_iommu_driver(const struct vfio_iommu_driver_ops *ops)
-{
-        struct vfio_iommu_driver *driver, *tmp;
-
-        if (WARN_ON(!ops->register_device != !ops->unregister_device))
-                return -EINVAL;
-
-        driver = kzalloc(sizeof(*driver), GFP_KERNEL);
-        if (!driver)
-                return -ENOMEM;
-
-        driver->ops = ops;
-
-        mutex_lock(&vfio.iommu_drivers_lock);
-
-        /* Check for duplicates */
-        list_for_each_entry(tmp, &vfio.iommu_drivers_list, vfio_next) {
-                if (tmp->ops == ops) {
-                        mutex_unlock(&vfio.iommu_drivers_lock);
-                        kfree(driver);
-                        return -EINVAL;
-                }
-        }
-
-        list_add(&driver->vfio_next, &vfio.iommu_drivers_list);
-
-        mutex_unlock(&vfio.iommu_drivers_lock);
-
-        return 0;
-}
-EXPORT_SYMBOL_GPL(vfio_register_iommu_driver);
-```
-There is only registered driver in the iommu_drivers_list unless the noiommu is
-used. Therefore, the open call through the selected driver invokes 
-vfio_iommu_type1_open function. Note that the list_add adds the current driver 
-to the iommu_drivers_list of vfio.
-
-```cpp
-        list_for_each_entry(driver, &vfio.iommu_drivers_list, vfio_next) {
-                void *data;
-        
-                if (!vfio_iommu_driver_allowed(container, driver))
-                        continue;
-                if (!try_module_get(driver->ops->owner))
-                        continue;
-
-                /*
-                 * The arg magic for SET_IOMMU is the same as CHECK_EXTENSION,
-                 * so test which iommu driver reported support for this
-                 * extension and call open on them.  We also pass them the
-                 * magic, allowing a single driver to support multiple
-                 * interfaces if they'd like.
-                 */
-                if (driver->ops->ioctl(NULL, VFIO_CHECK_EXTENSION, arg) <= 0) {
-                        module_put(driver->ops->owner);
-                        continue;
-                }
-
-                data = driver->ops->open(arg);
-                if (IS_ERR(data)) {
-                        ret = PTR_ERR(data);
-                        module_put(driver->ops->owner);
-                        continue;
-                }
-
-                ret = __vfio_container_attach_groups(container, driver, data);
-                if (ret) {
-                        driver->ops->release(data);
-                        module_put(driver->ops->owner);
-                        continue;
-                }
-
-                container->iommu_driver = driver;
-                container->iommu_data = data;
-                break;
-        }
-```
-Therefore, the selected driver in the iteration loop is the driver of the 
-vfio_iommu_type1_init.
+Therefore, the open call of the selected driver in vfio_ioctl_set_iommu will 
+invoke vfio_iommu_type1_open function. 
 
 ```cpp
 static void *vfio_iommu_type1_open(unsigned long arg)
@@ -859,11 +820,13 @@ static void *vfio_iommu_type1_open(unsigned long arg)
         return iommu;
 }       
 ```
+It allocates vfio_iommu struct instance, fill out the information, and return it. 
 
-This function allocates vfio_iommu struct instance and fill out the information. 
-Retrieved vfio_iommu will be used by __vfio_container_attach_groups function 
-to XXX
 
+### Attach vfio groups to vfio-iommu-driver (vfio_iommu_type1_attach_group)
+Retrieved vfio_iommu will be used by __vfio_container_attach_groups function to
+attach the group to the IOMMU driver. Remember that the container is the bigger
+higher level concept embracing multiple groups of vfio. 
 
 ```cpp
 /* hold write lock on container->group_lock */
@@ -892,14 +855,16 @@ unwind:
         return ret;
 }
 ```
-It iterates groups registered to the container and invokes the attach_group 
-function of the  vfio_iommu_driver_ops_type1 to attach group to iommu. 
+
+It iterates groups registered to the container and invokes the **attach_group**
+function of the vfio_iommu_driver_ops_type1 to attach group to iommu. Since the 
+vfio_iommu_type1_attach_group is complex and long, I will break down this 
+function into multiple sections based on crucial roles related with the 
+IOMMU. 
 
 ```cpp
 static int vfio_iommu_type1_attach_group(void *iommu_data,
                 struct iommu_group *iommu_group, enum vfio_group_type type) 
-		//iommu_group is the iommu_group of the group in container
-		//iommu_data is the vfio_iommu as a result of open of vfio_iommu_typ1
 {       
         struct vfio_iommu *iommu = iommu_data;
         struct vfio_iommu_group *group;
@@ -940,7 +905,25 @@ static int vfio_iommu_type1_attach_group(void *iommu_data,
         domain = kzalloc(sizeof(*domain), GFP_KERNEL);
         if (!domain)
                 goto out_free_group;
+```
+What is the input of this function? 
+- iommu_data: the vfio_iommu as a result of open of vfio_iommu_type1
+- iommu_group: the iommu_group of the group of the container
+Note that the second parameter is generated when the group was created by the
+vfio_group_find_or_alloc function. Most of the time, the iommu_group attached to
+the device used for generating the group is set as iommu_group of the vfio group. 
 
+What would be the result of this function? (possibly?)
+Note, it allocates vfio_iommu_group and vfio_domain in this function. Let's 
+focus on how those two data structure are initialized and embedded into other 
+parts of the VFIO drivers. 
+
+### Allocate new domain 
+```cpp
+static int vfio_iommu_type1_attach_group(void *iommu_data,                          
+                struct iommu_group *iommu_group, enum vfio_group_type type)     
+{         
+	......
         /*
          * Going via the iommu_group iterator avoids races, and trivially gives
          * us a representative device for the IOMMU API call. We don't actually
@@ -957,11 +940,318 @@ static int vfio_iommu_type1_attach_group(void *iommu_data,
                 if (ret)
                         goto out_domain;
         }
+```
 
+The role of the above part of the attach_group function is to invoke 
+vfio_iommu_domain_alloc function to all devices in the iommu_group. 
+
+```cpp
+int iommu_group_for_each_dev(struct iommu_group *group, void *data,
+                             int (*fn)(struct device *, void *))
+{
+        int ret;
+        
+        mutex_lock(&group->mutex);
+        ret = __iommu_group_for_each_dev(group, data, fn);
+        mutex_unlock(&group->mutex);
+
+        return ret;
+}       
+
+static int __iommu_group_for_each_dev(struct iommu_group *group, void *data,
+                                      int (*fn)(struct device *, void *))
+{
+        struct group_device *device;
+        int ret = 0;
+
+        list_for_each_entry(device, &group->devices, list) {
+                ret = fn(device->dev, data);
+                if (ret)
+                        break;
+        }
+        return ret;
+}       
+```
+
+```cpp
+static int vfio_iommu_domain_alloc(struct device *dev, void *data)
+{
+        struct iommu_domain **domain = data;
+
+        *domain = iommu_domain_alloc(dev->bus);
+        return 1; /* Don't iterate */
+}
+
+Although the list_for_each_entry is supposed to invoke __iommu_domain_alloc 
+function for every devices of the iommu_domain, but as vfio_iommu_domain_alloc 
+function returns 1, the function will be invoked for the first device in the 
+group and exit.
+
+struct iommu_domain *iommu_domain_alloc(struct bus_type *bus)
+{       
+        return __iommu_domain_alloc(bus, IOMMU_DOMAIN_UNMANAGED);
+}
+
+static struct iommu_domain *__iommu_domain_alloc(struct bus_type *bus,
+                                                 unsigned type)
+{               
+        struct iommu_domain *domain;
+                        
+        if (bus == NULL || bus->iommu_ops == NULL)
+                return NULL;
+                                    
+        domain = bus->iommu_ops->domain_alloc(type);
+        if (!domain)
+                return NULL;
+        
+        domain->type = type;          
+        /* Assume all sizes by default; the driver may override this later */
+        domain->pgsize_bitmap = bus->iommu_ops->pgsize_bitmap;
+        if (!domain->ops)
+                domain->ops = bus->iommu_ops->default_domain_ops;
+
+        if (iommu_is_dma_domain(domain) && iommu_get_dma_cookie(domain)) {
+                iommu_domain_free(domain);
+                domain = NULL;
+        }
+        return domain;
+}               
+```
+
+As we work on the aarch64, the iommu_ops of the bus should be the arm_smmu_ops. 
+Therefore, the domain_alloc function should invoke arm_smmu_domain_alloc. 
+
+```cpp
+static struct iommu_ops arm_smmu_ops = {
+        .capable                = arm_smmu_capable,
+        .domain_alloc           = arm_smmu_domain_alloc, 
+        .probe_device           = arm_smmu_probe_device,
+        .release_device         = arm_smmu_release_device,
+        .device_group           = arm_smmu_device_group,
+        .of_xlate               = arm_smmu_of_xlate,
+        .get_resv_regions       = arm_smmu_get_resv_regions,
+        .remove_dev_pasid       = arm_smmu_remove_dev_pasid,
+        .dev_enable_feat        = arm_smmu_dev_enable_feature,
+        .dev_disable_feat       = arm_smmu_dev_disable_feature,
+        .page_response          = arm_smmu_page_response,
+        .def_domain_type        = arm_smmu_def_domain_type,
+        .pgsize_bitmap          = -1UL, /* Restricted during device attach */
+        .owner                  = THIS_MODULE,
+        .default_domain_ops = &(const struct iommu_domain_ops) {
+                .attach_dev             = arm_smmu_attach_dev,
+                .map_pages              = arm_smmu_map_pages,
+                .unmap_pages            = arm_smmu_unmap_pages,
+                .flush_iotlb_all        = arm_smmu_flush_iotlb_all,
+                .iotlb_sync             = arm_smmu_iotlb_sync,
+                .iova_to_phys           = arm_smmu_iova_to_phys,
+                .enable_nesting         = arm_smmu_enable_nesting,
+                .free                   = arm_smmu_domain_free,
+        }
+};      
+
+static struct iommu_domain *arm_smmu_domain_alloc(unsigned type)
+{
+        struct arm_smmu_domain *smmu_domain;
+
+        if (type == IOMMU_DOMAIN_SVA)
+                return arm_smmu_sva_domain_alloc();
+
+        if (type != IOMMU_DOMAIN_UNMANAGED &&
+            type != IOMMU_DOMAIN_DMA &&
+            type != IOMMU_DOMAIN_DMA_FQ &&
+            type != IOMMU_DOMAIN_IDENTITY)
+                return NULL;
+
+        /*
+         * Allocate the domain and initialise some of its data structures.
+         * We can't really do anything meaningful until we've added a
+         * master.
+         */
+        smmu_domain = kzalloc(sizeof(*smmu_domain), GFP_KERNEL);
+        if (!smmu_domain)
+                return NULL;
+                
+        mutex_init(&smmu_domain->init_mutex);
+        INIT_LIST_HEAD(&smmu_domain->devices);
+        spin_lock_init(&smmu_domain->devices_lock);
+        INIT_LIST_HEAD(&smmu_domain->mmu_notifiers);
+                
+        return &smmu_domain->domain;
+}               
+```
+Now the iommu_domain is allocated to domain->domain.
+
+### Attach new IOMMU domain to the IOMMU group
+So far we created the smmu domain for the group!. The generated domain should be
+attached to the iommu_group. 
+
+```cpp
+static int vfio_iommu_type1_attach_group(void *iommu_data,                          
+                struct iommu_group *iommu_group, enum vfio_group_type type)     
+{         
+	......
         ret = iommu_attach_group(domain->domain, group->iommu_group);
         if (ret)
                 goto out_domain;
+```
 
+```cpp
+/**     
+ * iommu_attach_group - Attach an IOMMU domain to an IOMMU group
+ * @domain: IOMMU domain to attach
+ * @group: IOMMU group that will be attached
+ */
+int iommu_attach_group(struct iommu_domain *domain, struct iommu_group *group)
+{               
+        int ret;
+                
+        mutex_lock(&group->mutex);
+        ret = __iommu_attach_group(domain, group);
+        mutex_unlock(&group->mutex);
+        
+        return ret;
+}               
+
+static int __iommu_attach_group(struct iommu_domain *domain,
+                                struct iommu_group *group)
+{
+        int ret;
+        
+        if (group->domain && group->domain != group->default_domain &&
+            group->domain != group->blocking_domain)
+                return -EBUSY;
+
+        ret = __iommu_group_for_each_dev(group, domain,
+                                         iommu_group_do_attach_device);
+        if (ret == 0)
+                group->domain = domain;
+                
+        return ret;
+}       
+
+/*      
+ * IOMMU groups are really the natural working unit of the IOMMU, but
+ * the IOMMU API works on domains and devices.  Bridge that gap by
+ * iterating over the devices in a group.  Ideally we'd have a single
+ * device which represents the requestor ID of the group, but we also
+ * allow IOMMU drivers to create policy defined minimum sets, where
+ * the physical hardware may be able to distiguish members, but we
+ * wish to group them at a higher level (ex. untrusted multi-function
+ * PCI devices).  Thus we attach each device.
+ */
+static int iommu_group_do_attach_device(struct device *dev, void *data)
+{
+        struct iommu_domain *domain = data;
+        
+        return __iommu_attach_device(domain, dev);
+}               
+```
+The iommu_attach_group function can be explained as an invocation of 
+iommu_group_do_attach_device function for all devices in the IOMMU group with 
+IOMMU domain as its parameter.
+
+```cpp
+static int __iommu_attach_device(struct iommu_domain *domain,
+                                 struct device *dev)
+{       
+        int ret;
+                        
+        if (unlikely(domain->ops->attach_dev == NULL)) 
+                return -ENODEV;
+        
+        ret = domain->ops->attach_dev(domain, dev);
+        if (!ret)
+                trace_attach_device_to_domain(dev);
+        return ret;
+}    
+```
+Note that the domain passed to the __iommu_attach_device function is the domain
+generated as a result of __iommu_domain_alloc-> arm_smmu_domain_alloc function. 
+Therefore, its ops is the arm_smmu_ops, and attach_dev will invoke 
+arm_smmu_attach_dev.
+
+```cpp
+static int arm_smmu_attach_dev(struct iommu_domain *domain, struct device *dev)
+{               
+        int ret = 0;
+        unsigned long flags;
+        struct iommu_fwspec *fwspec = dev_iommu_fwspec_get(dev);
+        struct arm_smmu_device *smmu;   
+        struct arm_smmu_domain *smmu_domain = to_smmu_domain(domain);
+        struct arm_smmu_master *master; 
+        
+        if (!fwspec)
+                return -ENOENT;
+
+        master = dev_iommu_priv_get(dev); 
+        smmu = master->smmu;       
+                                   
+        dev_info(dev, "attaching new device!\n");
+        /*                         
+         * Checking that SVA is disabled ensures that this device isn't bound to
+         * any mm, and can be safely detached from its old domain. Bonds cannot
+         * be removed concurrently since we're holding the group mutex.
+         */
+        if (arm_smmu_master_sva_enabled(master)) {
+                dev_err(dev, "cannot attach - SVA enabled\n");
+                return -EBUSY;
+        }                                     
+                
+        //detach devices of the domain only when the dev needs to be attached to 
+        //existing domain
+        arm_smmu_detach_dev(master);
+        
+        mutex_lock(&smmu_domain->init_mutex);
+        
+        if (!smmu_domain->smmu) {
+                smmu_domain->smmu = smmu;
+                ret = arm_smmu_domain_finalise(domain, master);
+                if (ret) {
+                        smmu_domain->smmu = NULL;
+                        goto out_unlock;
+                }
+        } else if (smmu_domain->smmu != smmu) {
+                ret = -EINVAL;
+                goto out_unlock;
+        } else if (smmu_domain->stage == ARM_SMMU_DOMAIN_S1 &&
+                   master->ssid_bits != smmu_domain->s1_cfg.s1cdmax) {
+                ret = -EINVAL;
+                goto out_unlock;
+        } else if (smmu_domain->stage == ARM_SMMU_DOMAIN_S1 &&
+                   smmu_domain->stall_enabled != master->stall_enabled) {
+                ret = -EINVAL;
+                goto out_unlock;
+        }
+
+        master->domain = smmu_domain;
+
+        if (smmu_domain->stage != ARM_SMMU_DOMAIN_BYPASS)
+                master->ats_enabled = arm_smmu_ats_supported(master);
+
+        arm_smmu_install_ste_for_dev(master);
+
+        spin_lock_irqsave(&smmu_domain->devices_lock, flags);
+        list_add(&master->domain_head, &smmu_domain->devices);
+        spin_unlock_irqrestore(&smmu_domain->devices_lock, flags);
+
+        arm_smmu_enable_ats(master);
+
+out_unlock:
+        mutex_unlock(&smmu_domain->init_mutex);
+        return ret;
+}
+```
+
+This function initialize the CD and STE for the device. The detailed information
+of the initialize is described in the previous posting [].
+
+
+###
+```cpp
+static int vfio_iommu_type1_attach_group(void *iommu_data,
+                struct iommu_group *iommu_group, enum vfio_group_type type)
+{
+	......
         /* Get aperture info */
         geo = &domain->domain->geometry;
         if (vfio_iommu_aper_conflict(iommu, geo->aperture_start,
@@ -1097,233 +1387,6 @@ out_unlock:
 ```
 
 
-### Allocate new domain 
-First it needs to have new domain which is same as of the target device belongs 
-to the group.
-
-```cpp
-static int vfio_iommu_domain_alloc(struct device *dev, void *data)
-{
-        struct iommu_domain **domain = data;
-
-        *domain = iommu_domain_alloc(dev->bus);
-        return 1; /* Don't iterate */
-}
-
-struct iommu_domain *iommu_domain_alloc(struct bus_type *bus)
-{       
-        return __iommu_domain_alloc(bus, IOMMU_DOMAIN_UNMANAGED);
-}
-
-static struct iommu_domain *__iommu_domain_alloc(struct bus_type *bus,
-                                                 unsigned type)
-{               
-        struct iommu_domain *domain;
-                        
-        if (bus == NULL || bus->iommu_ops == NULL)
-                return NULL;
-                                    
-        domain = bus->iommu_ops->domain_alloc(type);
-        if (!domain)
-                return NULL;
-        
-        domain->type = type;          
-        /* Assume all sizes by default; the driver may override this later */
-        domain->pgsize_bitmap = bus->iommu_ops->pgsize_bitmap;
-        if (!domain->ops)
-                domain->ops = bus->iommu_ops->default_domain_ops;
-
-        if (iommu_is_dma_domain(domain) && iommu_get_dma_cookie(domain)) {
-                iommu_domain_free(domain);
-                domain = NULL;
-        }
-        return domain;
-}               
-```
-
-
-### Bind the devices to the new iommu domain
-```cpp
-/**     
- * iommu_attach_group - Attach an IOMMU domain to an IOMMU group
- * @domain: IOMMU domain to attach
- * @group: IOMMU group that will be attached
- *      
- * Returns 0 on success and error code on failure
- *              
- * Note that EINVAL can be treated as a soft failure, indicating
- * that certain configuration of the domain is incompatible with
- * the group. In this case attaching a different domain to the
- * group may succeed.
- */
-int iommu_attach_group(struct iommu_domain *domain, struct iommu_group *group)
-{               
-        int ret;
-                
-        mutex_lock(&group->mutex);
-        ret = __iommu_attach_group(domain, group);
-        mutex_unlock(&group->mutex);
-        
-        return ret;
-}               
-
-static int __iommu_attach_group(struct iommu_domain *domain,
-                                struct iommu_group *group)
-{
-        int ret;
-        
-        if (group->domain && group->domain != group->default_domain &&
-            group->domain != group->blocking_domain)
-                return -EBUSY;
-
-        ret = __iommu_group_for_each_dev(group, domain,
-                                         iommu_group_do_attach_device);
-        if (ret == 0)
-                group->domain = domain;
-                
-        return ret;
-}       
-
-/*      
- * IOMMU groups are really the natural working unit of the IOMMU, but
- * the IOMMU API works on domains and devices.  Bridge that gap by
- * iterating over the devices in a group.  Ideally we'd have a single
- * device which represents the requestor ID of the group, but we also
- * allow IOMMU drivers to create policy defined minimum sets, where
- * the physical hardware may be able to distiguish members, but we
- * wish to group them at a higher level (ex. untrusted multi-function
- * PCI devices).  Thus we attach each device.
- */
-static int iommu_group_do_attach_device(struct device *dev, void *data)
-{
-        struct iommu_domain *domain = data;
-        
-        return __iommu_attach_device(domain, dev);
-}               
-```
-
-The above functions are used in attaching devices of the group to the previously
-generated IOMMU domain. To accomplish this task, it invokes attach_dev function
-registered in the domain, which is the arm_smmu_attach_dev in this case. 
-
-
-```cpp
-static int __iommu_attach_device(struct iommu_domain *domain,
-                                 struct device *dev)
-{       
-        int ret;
-                        
-        if (unlikely(domain->ops->attach_dev == NULL)) 
-                return -ENODEV;
-        
-        ret = domain->ops->attach_dev(domain, dev);
-        if (!ret)
-                trace_attach_device_to_domain(dev);
-        return ret;
-}    
-
-static struct iommu_ops arm_smmu_ops = {
-        .capable                = arm_smmu_capable,
-        .domain_alloc           = arm_smmu_domain_alloc, 
-        .probe_device           = arm_smmu_probe_device,
-        .release_device         = arm_smmu_release_device,
-        .device_group           = arm_smmu_device_group,
-        .of_xlate               = arm_smmu_of_xlate,
-        .get_resv_regions       = arm_smmu_get_resv_regions,
-        .remove_dev_pasid       = arm_smmu_remove_dev_pasid,
-        .dev_enable_feat        = arm_smmu_dev_enable_feature,
-        .dev_disable_feat       = arm_smmu_dev_disable_feature,
-        .page_response          = arm_smmu_page_response,
-        .def_domain_type        = arm_smmu_def_domain_type,
-        .pgsize_bitmap          = -1UL, /* Restricted during device attach */
-        .owner                  = THIS_MODULE,
-        .default_domain_ops = &(const struct iommu_domain_ops) {
-                .attach_dev             = arm_smmu_attach_dev,
-                .map_pages              = arm_smmu_map_pages,
-                .unmap_pages            = arm_smmu_unmap_pages,
-                .flush_iotlb_all        = arm_smmu_flush_iotlb_all,
-                .iotlb_sync             = arm_smmu_iotlb_sync,
-                .iova_to_phys           = arm_smmu_iova_to_phys,
-                .enable_nesting         = arm_smmu_enable_nesting,
-                .free                   = arm_smmu_domain_free,
-        }
-};      
-```
-
-```cpp
-static int arm_smmu_attach_dev(struct iommu_domain *domain, struct device *dev)
-{               
-        int ret = 0;
-        unsigned long flags;
-        struct iommu_fwspec *fwspec = dev_iommu_fwspec_get(dev);
-        struct arm_smmu_device *smmu;   
-        struct arm_smmu_domain *smmu_domain = to_smmu_domain(domain);
-        struct arm_smmu_master *master; 
-        
-        if (!fwspec)
-                return -ENOENT;
-
-        master = dev_iommu_priv_get(dev); 
-        smmu = master->smmu;       
-                                   
-        dev_info(dev, "attaching new device!\n");
-        /*                         
-         * Checking that SVA is disabled ensures that this device isn't bound to
-         * any mm, and can be safely detached from its old domain. Bonds cannot
-         * be removed concurrently since we're holding the group mutex.
-         */
-        if (arm_smmu_master_sva_enabled(master)) {
-                dev_err(dev, "cannot attach - SVA enabled\n");
-                return -EBUSY;
-        }                                     
-                
-        //detach devices of the domain only when the dev needs to be attached to 
-        //existing domain
-        arm_smmu_detach_dev(master);
-        
-        mutex_lock(&smmu_domain->init_mutex);
-        
-        if (!smmu_domain->smmu) {
-                smmu_domain->smmu = smmu;
-                ret = arm_smmu_domain_finalise(domain, master);
-                if (ret) {
-                        smmu_domain->smmu = NULL;
-                        goto out_unlock;
-                }
-        } else if (smmu_domain->smmu != smmu) {
-                ret = -EINVAL;
-                goto out_unlock;
-        } else if (smmu_domain->stage == ARM_SMMU_DOMAIN_S1 &&
-                   master->ssid_bits != smmu_domain->s1_cfg.s1cdmax) {
-                ret = -EINVAL;
-                goto out_unlock;
-        } else if (smmu_domain->stage == ARM_SMMU_DOMAIN_S1 &&
-                   smmu_domain->stall_enabled != master->stall_enabled) {
-                ret = -EINVAL;
-                goto out_unlock;
-        }
-
-        master->domain = smmu_domain;
-
-        if (smmu_domain->stage != ARM_SMMU_DOMAIN_BYPASS)
-                master->ats_enabled = arm_smmu_ats_supported(master);
-
-        arm_smmu_install_ste_for_dev(master);
-
-        spin_lock_irqsave(&smmu_domain->devices_lock, flags);
-        list_add(&master->domain_head, &smmu_domain->devices);
-        spin_unlock_irqrestore(&smmu_domain->devices_lock, flags);
-
-        arm_smmu_enable_ats(master);
-
-out_unlock:
-        mutex_unlock(&smmu_domain->init_mutex);
-        return ret;
-}
-```
-
-
-
 
 ```cpp
 static int __iommu_group_set_domain(struct iommu_group *group,
@@ -1368,7 +1431,7 @@ static int __iommu_group_set_domain(struct iommu_group *group,
 
 
 
-## Establish IOMMU mapping for pci
+## Establish IOMMU mapping for pci (vfio_iommu_driver)
 To establish IOMMU mapping for vfio device, vfio_iommu_driver provides service
 for user processes. I will go through ioctl function dedicated for this and go
 through several functions called up until invoking the function related with 
@@ -1427,6 +1490,7 @@ static int vfio_container_init(struct kvm *kvm)
                                       NULL);
 }
 ```
+
 Generally, there would be two KVM_MEM_TYPE_RAM memory banks: one for the guest 
 kernel and the other for the para-virtualized space. For those two memory 
 regions or more, the vfio_map_mem_bank function is invoked and register GPA in 
@@ -1454,12 +1518,15 @@ static int vfio_map_mem_bank(struct kvm *kvm, struct kvm_mem_bank *bank, void *d
         return ret;
 }
 ```
+
 KVMTOOL iterates all KVM_MEM_TYPE_RAM and invokes ioctl to vfio_container. Note 
 that dma_map variable conveys memory information that needs to be mapped in the 
 IOMMU to the kernel driver. Note that the guest_phys_addr (iova) and host_addr 
 (mapped to the guest) are passed to the driver altogether. 
 
 ### kernel-side handling for VFIO_IOMMU_MAP_DMA
+The IOMMU should be controlled by the host kernel, and VFIO_IOMMU_MAP_DMA ioctl
+function handles the IOMMU mapping request from the user. 
 
 ```cpp
 static long vfio_fops_unl_ioctl(struct file *filep,
@@ -1497,7 +1564,29 @@ static long vfio_fops_unl_ioctl(struct file *filep,
 However, there is no VFIO_IOMMU_MAP_DMA ioctl function, and it invokes the ioctl 
 of the driver maintained by the container. 
 
+
 ```cpp
+static long vfio_iommu_type1_ioctl(void *iommu_data,
+                                   unsigned int cmd, unsigned long arg)
+{               
+        struct vfio_iommu *iommu = iommu_data;
+                
+        switch (cmd) {
+        case VFIO_CHECK_EXTENSION:
+                return vfio_iommu_type1_check_extension(iommu, arg);
+        case VFIO_IOMMU_GET_INFO: 
+                return vfio_iommu_type1_get_info(iommu, arg);
+        case VFIO_IOMMU_MAP_DMA:
+                return vfio_iommu_type1_map_dma(iommu, arg);
+        case VFIO_IOMMU_UNMAP_DMA:  
+                return vfio_iommu_type1_unmap_dma(iommu, arg);
+        case VFIO_IOMMU_DIRTY_PAGES:
+                return vfio_iommu_type1_dirty_pages(iommu, arg);
+        default: 
+                return -ENOTTY;
+        }
+}       
+
 static int vfio_iommu_type1_map_dma(struct vfio_iommu *iommu,
                                     unsigned long arg)
 {               
