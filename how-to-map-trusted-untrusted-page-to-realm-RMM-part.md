@@ -156,11 +156,11 @@ bool s2tte_is_valid_ns(unsigned long s2tte, long level)
 
 ## Map Realm IPA
 ### Set-up RIPAS 
-After relocating the page to the realm, its RIPAS should be set to be used as 
-a secure code/data page located inside the secure IPA range. To setup the RIPAS, 
-stage2 page table entry associated with the target IPA page is used. Note that 
-the last 1 bit of the stage2 page entry indicates if the page mapped by that 
-s2tte is used (as code/data page) or not used. 
+After relocating the page to the realm, its RIPAS should be initialized to be 
+used as a secure code/data page located inside the secure IPA range. To setup 
+the RIPAS, stage2 page table entry associated with the target IPA page is used. 
+Note that the last 1 bit of the stage2 page entry indicates if the page mapped 
+by that s2tte is used (as code/data page) or not used. 
 
 ```cpp
  /*
@@ -472,11 +472,39 @@ Therefore, when the realm tries to access the page mapped through the
 s2tte_create_assigned_empty, then it raise the execution fault because the flags
 set for that page preventing the MMU from accessing the page. 
 
+```cpp
+static unsigned long data_create(unsigned long data_addr,
+                                 unsigned long rd_addr,
+                                 unsigned long map_addr,
+                                 struct granule *g_src,
+                                 unsigned long flags)
+	......
+	s2tte_write(&s2tt[wi.index], s2tte);
+
+        __granule_get(wi.g_llt);
+
+        ret = RMI_SUCCESS;
+                
+out_unmap_ll_table:
+        buffer_unmap(s2tt);
+out_unlock_ll_table:
+        granule_unlock(wi.g_llt); 
+out_unmap_rd:
+        buffer_unmap(rd);
+        granule_unlock(g_rd);
+        granule_unlock_transition(g_data, new_data_state);
+        return ret;
+}               
+```
+After generating the s2tte, just updating the parent s2tt establish the proper
+mapping!
+
 ## Map NS-IPA
 Non-secure pages are mapped through the stage 2 page table secured by the RMM.
 However, instead of building entire page entry mapped to the NS memory from the 
-scratch, host passes the generated page to the RMM and RMM checks and sets the 
-required field for security and convenience. 
+scratch, **host passes the generated page to the RMM** and RMM validates the 
+provided s2tte and patch security critical field to provide some security 
+guarantees. 
 
 
 ```cpp
@@ -501,6 +529,10 @@ unsigned long smc_rtt_unmap_unprotected(unsigned long rd_addr,
         return map_unmap_ns(rd_addr, map_addr, (long)ulevel, 0UL, UNMAP_NS);
 }
 ```
+
+As shown in the above two RMI handling functions, both utilize the map_unmap_ns
+function to map or unmap untrusted pages in the s2tt. 
+
 
 ```cpp
 /*
@@ -555,6 +587,16 @@ static unsigned long map_unmap_ns(unsigned long rd_addr,
                                   long level,
                                   unsigned long host_s2tte,
                                   enum map_unmap_ns_op op)
+	......
+        rtt_walk_lock_unlock(g_table_root, sl, ipa_bits,
+                                map_addr, level, &wi);
+        if (wi.last_level != level) {
+                ret = pack_return_code(RMI_ERROR_RTT, wi.last_level);
+                goto out_unlock_llt;
+        }
+
+        s2tt = granule_map(wi.g_llt, SLOT_RTT);
+        s2tte = s2tte_read(&s2tt[wi.index]);
         if (op == MAP_NS) {
                 if (!s2tte_is_unassigned(s2tte)) {
                         ret = pack_return_code(RMI_ERROR_RTT,
@@ -586,13 +628,12 @@ static unsigned long map_unmap_ns(unsigned long rd_addr,
                         invalidate_block(&s2_ctx, map_addr);
                 }
         }
-
-
 ```
 
 As shown in the code, RMI for mapping the NS memory doesn't require a physical
 page address because host_s2tte already provides the address and additional 
-attributes required to map the page from the RMM.
+attributes required to map IPA. When the target s2tte RIPAS is set as unassigned,
+it can create valid s2tte for untrusted mapping.
 
 ```cpp
 /*
@@ -612,6 +653,26 @@ unsigned long s2tte_create_valid_ns(unsigned long s2tte, long level)
         }
         return (s2tte | S2TTE_BLOCK_NS);
 }
+
+/*
+ * We set HCR_EL2.FWB So we set bit[4] to 1 and bits[3:2] to 2 and force
+ * everyting to be Normal Write-Back
+ */
+#define S2TTE_MEMATTR_FWB_NORMAL_WB     ((1UL << 4) | (2UL << 2))
+#define S2TTE_AF                        (1UL << 10)
+#define S2TTE_XN                        (2UL << 53)
+#define S2TTE_NS                        (1UL << 55)
+
+#define S2TTE_ATTRS     (S2TTE_MEMATTR_FWB_NORMAL_WB | S2TTE_AP_RW | \
+                        S2TTE_SH_IS | S2TTE_AF)
+
+#define S2TTE_TABLE     S2TTE_L012_TABLE
+#define S2TTE_BLOCK     (S2TTE_ATTRS | S2TTE_L012_BLOCK)
+#define S2TTE_PAGE      (S2TTE_ATTRS | S2TTE_L3_PAGE)
+#define S2TTE_BLOCK_NS  (S2TTE_NS | S2TTE_XN | S2TTE_AF | S2TTE_L012_BLOCK)
+#define S2TTE_PAGE_NS   (S2TTE_NS | S2TTE_XN | S2TTE_AF | S2TTE_L3_PAGE)
+#define S2TTE_INVALID   0
+
 ```
 
 

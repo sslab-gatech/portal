@@ -438,6 +438,8 @@ static bool handle_realm_rsi(struct rec *rec, struct rmi_rec_exit *rec_exit)
                 }
                 break;
 ```
+Based on the function id of the RSI it will invoke different function. In this 
+case, for SMC_RSI_IPA_STATE_SET, it will invoke handle_rsi_ipa_state_set.
 
 
 ```cpp
@@ -482,12 +484,15 @@ bool handle_rsi_ipa_state_set(struct rec *rec, struct rmi_rec_exit *rec_exit)
         return false;
 }
 ```
-
 As it needs host supports to change the RIPAS through the RMI, it returns until
-the smc_rec_enter function which runs Realm execution loop. Note that the ripas 
-is set for rec_exit so that host can process the RIPAS_CHANGE RSI. BTW, when the
-rec->set_ripas is used??? \XXX
-
+the smc_rec_enter function which runs realm execution loop. Note that the 
+information about the ripas change is passed to the host through the rec_exit. 
+Also note that similar information is also memorized in the rec->set_ripas. This
+information is used later by the RMM to check if the host initiated the RMI 
+properly to update the RIPAS by comparing input of the RMI and rec->set_ripas 
+values. Also, note that the RMI_EXIT_RIPAS_CHANGE is set for the exit_reason 
+to help host to process the RSI properly. One last thing to remember is that the 
+start address is in IPA. 
 
 ```cpp
 unsigned long smc_rec_enter(unsigned long rec_addr,
@@ -516,7 +521,7 @@ out_unmap_buffers:
 }
 ```
 As it needs host supports, it will returns to the host and host will process the 
-RSI on host side.
+rec exit due to RSI on host side.
 
 ## Host Side
 As the processor enters Realm through the kvm_arch_vcpu_ioctl_run function,
@@ -632,6 +637,10 @@ int handle_rme_exit(struct kvm_vcpu *vcpu, int rec_run_ret)
 }
 ```
 
+It handles realm exit based on the exit_reason of the realm. As we seen in the 
+RMM side code, it has been set as RMI_EXIT_RIPAS_CHANGE, so it will invoke the 
+exit_ripas_change function to handle the RSI.
+
 ```cpp
 static int rec_exit_ripas_change(struct kvm_vcpu *vcpu)
 {
@@ -678,7 +687,8 @@ int realm_set_ipa_state(struct kvm_vcpu *vcpu,
         return ret;
 }
 ```
-
+It traverses the memory pages in the memory range specified by the rec_exit and 
+invokes the RMI to ask the RMM change the RIPAS. 
 
 ```cpp
 static int set_ipa_state(struct kvm_vcpu *vcpu,
@@ -735,6 +745,11 @@ static int set_ipa_state(struct kvm_vcpu *vcpu,
 ```
 
 ## Enter RMM to handle set_ripas RMI
+As the host invokes RTT_SET_RIPAS smc, the execution control jumps to the RMM 
+again, but notice that this doesn't mean that the execution goes back to the 
+realm. After handling the RMI call, it will return to the host again and then 
+return to the realm.
+
 ```cpp
 unsigned long smc_rtt_set_ripas(unsigned long rd_addr,
                                 unsigned long rec_addr,
@@ -786,6 +801,17 @@ unsigned long smc_rtt_set_ripas(unsigned long rd_addr,
         ret = RMI_SUCCESS;
 ```
 
+Note that the rec->set_ripas which was set while handling RSI call. Because the 
+ripas of realm page should not be changed freely as the request of the host, it 
+compares the host provided parameter for RTT_SET_RIPAS RMI is same with the ones 
+that memorized due to RSI. The most important part of this complicated procedure
+is ripas can only be changed for the memory range where the realm wants to 
+changes its ripas. Therefore, it checks whether the request's ripas and its 
+map_addr corresponds with the request. Also note that after handling the ripas 
+change, it updates the addr field of the set_ripas because the RMI is invoked 
+per page, so there can be remaining RMI call to finish RSI. Now let's see how 
+it actually change the ripas. 
+
 ```cpp
 static bool update_ripas(unsigned long *s2tte, unsigned long level,
                          enum ripas ripas)
@@ -810,6 +836,9 @@ static bool update_ripas(unsigned long *s2tte, unsigned long level,
         return false;
 }
 ```
+
+Note that the ripas parameter has a new ripas value that should be updated for 
+the target ipa.
 
 ```cpp
 /*              
@@ -840,13 +869,12 @@ static bool s2tte_check(unsigned long s2tte, long level, unsigned long ns)
 }
 ```
 
-s2tte_is_valid functions checks NS field (it should be unset) and the page maps 
-to the leaf page or leaf block. Getting back to the update_ripas, if it is valid
-s2tte page which means it is set as secure IPA page, it checks if the ripas
-needs to be changed. If the s2tte page is valid, it means that the page was set
-as RIPAS_RAM, so it checks if the requesting change is RIPAS_EMPTY. If yes, it 
-retrieves the PA mapped to the existing S2TTE and generate new S2TTE with new 
-RIPAS.
+s2tte_is_valid functions checks NS field is unset, which means that the mapped 
+page is trusted ipa. Also, it validates if the mapped page is leaf page or leaf
+block. If the s2tte_is_valid check passes true, it means that the page mapped by
+the s2tte is trusted ipa and the leaf page. After the valid test passes, it 
+checks if the requesting change is RIPAS_EMPTY. If yes, it retrieves the PA 
+mapped to the existing S2TTE and generate new S2TTE with new RIPAS.
 
 
 ```cpp
@@ -862,9 +890,8 @@ unsigned long s2tte_create_assigned_empty(unsigned long pa, long level)
 }
 ```
 
-Now the new S2TTE entry indicates that this mapping is not RIPAS(RIPAS_EMPTY)
-but assigned (HIPAS_ASSIGNED). Note that the NS bit is not changed, it just 
-changes the RIPAS and HIPAS!
+Based on the request, the RIPAS is changed to S2TTE_INVALID_RIPAS_EMPTY. Note 
+that the NS bit is not set for the s2tte. 
 
 ## Return to Host again
 ```cpp
@@ -887,10 +914,10 @@ static int set_ipa_state(struct kvm_vcpu *vcpu,
 After returning from the rtt_set_ripas, the host should unmap the page when the 
 return from the RMI success and the changed ripas was EMPTY. Because the changed
 RIPAS is EMPTY not RAM, which is the result of the previous RSI call from the 
-realm. If the RIPAS has been changed from the RAM to EMPTY, it indicates that 
-the page cannot be used for DATA page, and REALM wants to utilize this page as
-untrusted memory to communicate with Host. Therefore, the purpose of the page 
-should be changed properly, which is done by following RMI call. 
+realm. If the RIPAS has been changed from the RAM to EMPTY, the page cannot be 
+used for DATA page, unless RMI_RTT_SET_RIPAS(RAM) is invoked for that page.
+Because realm wants to utilize the IPA whose ripas was changed from the RAM to 
+EMPTY as the untrusted, host destroy the rtt of that ipa. 
 
 ```cpp
 void kvm_realm_unmap_range(struct kvm *kvm, unsigned long ipa, u64 size)
@@ -1052,7 +1079,124 @@ static void realm_destroy_undelegate_range(struct realm *realm,
 
 Explain what is data_destory and granule undelegate.. 
 
-## Return to Realm Side (after the RSI)
+## Return to RMM
+After the handle_rme_exit returns (1) which means it can continue execution on
+realm, it will enter the RMM through RMI_REC_ENTER RMI call. 
+
+```cpp
+unsigned long smc_rec_enter(unsigned long rec_addr,
+                            unsigned long rec_run_addr)
+{       
+        struct granule *g_rec;
+        struct granule *g_run;
+        struct rec *rec;
+        struct rd *rd;
+        struct rmi_rec_run rec_run;
+        unsigned long realm_state, ret;
+        bool success;
+	......
+        complete_set_ripas(rec);
+	......
+}
+
+static void complete_set_ripas(struct rec *rec)
+{
+        if (rec->set_ripas.start != rec->set_ripas.end) {
+                /* Pending request from Realm */
+                rec->regs[0] = RSI_SUCCESS;
+                rec->regs[1] = rec->set_ripas.addr;
+
+                rec->set_ripas.start = 0UL;
+                rec->set_ripas.end = 0UL;
+        }
+}
+```
+If the start and end addresses of the set_ripas were not same, then it means 
+that there were a RSI call asking ripas change before. Therefore, it complete
+ripas change RSI by setting regs[0] and regs[1] and unset set_ripas fields. 
+The updated regs will be fed into the realm so that the realm can confirm if 
+the RSI request was processed by the host or not. Is it really safe? what if the
+host enter the realm before finishing all ripas change as RSI requested? We will
+see how the realm reacts to this!
+
+
+## Return to realm 
+Let's go back to the code right after the RSI call. 
+```cpp
+static inline unsigned long rsi_set_addr_range_state(phys_addr_t start,
+                                                     phys_addr_t end,
+                                                     enum ripas state,
+                                                     phys_addr_t *top)
+{
+        struct arm_smccc_res res;
+
+        invoke_rsi_fn_smc_with_res(SMC_RSI_IPA_STATE_SET,
+                                   start, (end - start), state, 0, &res);
+
+        *top = res.a1;
+        return res.a0;
+}       
+```
+As the RMM fed the rec->set_ripas.addr to the res[1] it will be passed to the 
+top indicating the highest address that ripas was changed by the host and RMM. 
+Also, a0 is the RSI_SUCCESS.
+
+```cpp
+static inline void set_memory_range(phys_addr_t start, phys_addr_t end,
+                                    enum ripas state)
+{
+        unsigned long ret;
+        phys_addr_t top;
+
+        while (start != end) {
+                ret = rsi_set_addr_range_state(start, end, state, &top);
+                BUG_ON(ret);
+                BUG_ON(top < start);
+                BUG_ON(top > end);
+                start = top;                         
+        }                                            
+}       
+```
+To prevent the case where the host enter the realm before finishing RSI, which 
+means that RIPAS of all IPA pages requested to be changed has not been updated
+properly, it checks the top address range. Also, if the start and end is not 
+equal it invokes RSI again to ask host to handle it properly. If the host and 
+RMM has handled the RSI request properly, it returns to __set_memory_encrypted.
+Let's see what is the remaining job.
+
+```cpp
+static int __set_memory_encrypted(unsigned long addr,
+                                  int numpages,
+                                  bool encrypt)
+{
+        unsigned long set_prot = 0, clear_prot = 0;
+        phys_addr_t start, end;
+
+        if (!is_realm_world())
+                return 0;
+
+        WARN_ON(!__is_lm_address(addr));
+        start = __virt_to_phys(addr);
+        end = start + numpages * PAGE_SIZE;
+
+        if (encrypt) {
+                clear_prot = PROT_NS_SHARED;
+                set_memory_range_protected(start, end);
+        } else {
+                set_prot = PROT_NS_SHARED;
+                set_memory_range_shared(start, end);
+        }
+
+        return __change_memory_common(addr, PAGE_SIZE * numpages,
+                                      __pgprot(set_prot),
+                                      __pgprot(clear_prot));
+}
+```
+
+As the RIPAS has been changed by the RSI, the IPA should be changed as well. 
+Remind that the MSB of the IPA is used to distinguish whether it is mapped to
+trusted or non-trusted IPA. This change on IPA is done by the below function. 
+
 ```cpp
 /*
  * This function assumes that the range is mapped with PAGE_SIZE pages.
@@ -1074,33 +1218,15 @@ static int __change_memory_common(unsigned long start, unsigned long size,
 }
 ```
 
-As the RIPAS has been changed by the RSI, the IPA should be changed as well. 
-Remind that the MSB of the IPA is used to distinguish whether it is mapped to
-trusted or non-trusted IPA. The apply_to_page_range function invokes the passed
-function, changed_page_range for the address range that has been changed due to
-RSI call. Note that set_mask is passed from the __set_memory_encrypted function.
-
-```cpp
-void __init arm64_rsi_init(void)
-{
-        if (!rsi_version_matches())
-                return;
-        if (rsi_get_realm_config(&config))
-                return;
-        prot_ns_shared = BIT(config.ipa_bits - 1);
-
-        if (config.ipa_bits - 1 < phys_mask_shift)
-                phys_mask_shift = config.ipa_bits - 1;
-
-        static_branch_enable(&rsi_present);
-}
-```
-
-
-This field has been initialized by the above function to indicate which bit is 
-used to split the address space in guest VM. Therefore, for the case where the 
-memory has been set as decrypted, the set_mask of the data is set with the bit 
-determining the upper half. 
+The apply_to_page_range function invokes the passed function, changed_page_range,
+for the ptep of the memory range specified by the start and size. Note that the 
+start address is the virtual, so this macro will invoke this function with the 
+pte of each page mapped in between [start, start+size]. Also note that it passes
+the set_mask and clear_mask as data to the function. If we assume that the 
+previous RSI changed the RIPAS of the IPA pages to the RIPAS_EMPTY, the set_prot
+field is set as PROT_NS_SHARED, which is the MSB of the IPA. Remember that the 
+trusted and untrusted IPA is split into lower and upper half utilizing MSB of 
+the IPA. 
 
 
 ```cpp
@@ -1118,14 +1244,17 @@ static int change_page_range(pte_t *ptep, unsigned long addr, void *data)
 }
 ```
 
-As shown in the code, it sets or unsets the MSB which is used to distinguish 
-IPA for the address range that have been changed. From now on, the Realm can 
-access the non-trusted address or trusted address through the changed IPA 
-mapping. 
+If the realm wants to change the trusted IPA to untrusted, then its IPA should
+be mapped to upper half, and this is accomplished by set_pte_bit macro. It sets
+MSB of the pte and store it in the pte. The set_pte function will update the 
+pte. As the virtual address used for DMA is not mapped from the trusted to 
+untrusted IPA by updating the PTE, which means updating the IPA, the accesses 
+through this memory address will trigger the data abort exit from the realm. 
+This is because the untrusted IPA is not mapped to host physical address in the 
+s2tt. Therefore, the raised fault should be handled by the RMM and the s2tt 
+should be patched accordingly to make the realm access the untrusted host memory.
 
 
-
-\TODO{note_nw add}
 
 
 ## Questions & Answers
@@ -1133,3 +1262,30 @@ mapping.
 >Realm data access to a Protected IPA whose RIPAS is EMPTY causes a Synchronous
 >External Abort taken to the Realm.
 realm_destroy_undelegate_range)
+
+
+
+
+
+### prot_ns_shared bit
+
+```cpp
+void __init arm64_rsi_init(void)
+{
+        if (!rsi_version_matches())
+                return;
+        if (rsi_get_realm_config(&config))
+                return;
+        prot_ns_shared = BIT(config.ipa_bits - 1);
+
+        if (config.ipa_bits - 1 < phys_mask_shift)
+                phys_mask_shift = config.ipa_bits - 1;
+
+        static_branch_enable(&rsi_present);
+}
+```
+
+This field has been initialized by the above function to indicate which bit is 
+used to split the address space in guest VM. Therefore, for the case where the 
+memory has been set as decrypted, the set_mask of the data is set with the bit 
+determining the upper half. 
