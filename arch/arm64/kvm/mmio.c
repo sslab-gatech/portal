@@ -138,7 +138,7 @@ int io_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa)
 	 * No valid syndrome? Ask userspace for help if it has
 	 * volunteered to do so, and bail out otherwise.
 	 */
-	if (fault_ipa == 0x0050000000 || fault_ipa == 0x40000000)
+	if ((fault_ipa >= 0x50000000 && fault_ipa < 0x50020000) || (fault_ipa >= 0x40000000 && fault_ipa <= 0x4fffffff))
 		printk("[%s] fault_ipa:%llx\n", __func__, fault_ipa);
 	if (!kvm_vcpu_dabt_isvalid(vcpu)) {
 		if (test_bit(KVM_ARCH_FLAG_RETURN_NISV_IO_ABORT_TO_USER,
