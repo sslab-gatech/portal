@@ -366,7 +366,7 @@ static void e1000_configure(struct e1000_adapter *adapter)
 	e1000_set_rx_mode(netdev);
 
 	e1000_restore_vlan(adapter);
-	e1000_init_manageability(adapter);
+	e1000_init_manageability(adapter); //5820
 
 	e1000_configure_tx(adapter);
 	e1000_setup_rctl(adapter);
@@ -974,6 +974,8 @@ static int e1000_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 	err = -EIO;
 	hw->hw_addr = pci_ioremap_bar(pdev, BAR_0);
+	printk("BAR0 : 0x%llx - 0x%llx\n", pdev->resource[BAR_0].start,
+			pdev->resource[BAR_0].start + resource_size(&pdev->resource[BAR_0]));
 	if (!hw->hw_addr)
 		goto err_ioremap;
 
@@ -1511,6 +1513,7 @@ static int e1000_setup_tx_resources(struct e1000_adapter *adapter,
 	txdr->size = txdr->count * sizeof(struct e1000_tx_desc);
 	txdr->size = ALIGN(txdr->size, 4096);
 
+	printk("%s\n\n\n", __func__);
 	txdr->desc = dma_alloc_coherent(&pdev->dev, txdr->size, &txdr->dma,
 					GFP_KERNEL);
 	if (!txdr->desc) {
@@ -1602,6 +1605,7 @@ static void e1000_configure_tx(struct e1000_adapter *adapter)
 	switch (adapter->num_tx_queues) {
 	case 1:
 	default:
+		printk("Set up tx ring buffer to device! TDBAH:%llx\n",(uint64_t)(hw->hw_addr + E1000_TDBAH));
 		tdba = adapter->tx_ring[0].dma;
 		tdlen = adapter->tx_ring[0].count *
 			sizeof(struct e1000_tx_desc);
@@ -1703,6 +1707,7 @@ static int e1000_setup_rx_resources(struct e1000_adapter *adapter,
 	rxdr->size = rxdr->count * desc_len;
 	rxdr->size = ALIGN(rxdr->size, 4096);
 
+	printk("%s\n\n\n",__func__);
 	rxdr->desc = dma_alloc_coherent(&pdev->dev, rxdr->size, &rxdr->dma,
 					GFP_KERNEL);
 	if (!rxdr->desc) {
