@@ -1040,8 +1040,8 @@ unsigned long smc_data_destroy(unsigned long rd_addr,
 	 * If valid, transition HIPAS to DESTROYED and if HIPAS=ASSIGNED,
 	 * transition to UNASSIGNED.
 	 */
-	s2tte = valid ? s2tte_create_destroyed() :
-			s2tte_create_unassigned(RIPAS_EMPTY);
+	s2tte = valid ? s2tte_create_destroyed() :            //from data page
+			s2tte_create_unassigned(RIPAS_EMPTY); //from assigned empty
 
 	s2tte_write(&s2tt[wi.index], s2tte);
 
