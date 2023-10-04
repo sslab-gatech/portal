@@ -111,7 +111,7 @@ static bool ipa_is_empty(unsigned long ipa, struct rec *rec)
 	assert(GRANULE_ALIGNED(ipa));
 
 	if (!addr_in_rec_par(rec, ipa)) {
-		INFO("address is not in PAR!!!\n");
+		INFO("address %lx is not in PAR!!!\n", ipa);
 		return false;
 	}
 	granule_lock(rec->realm_info.g_rtt, GRANULE_STATE_RTT);
@@ -132,7 +132,7 @@ static bool ipa_is_empty(unsigned long ipa, struct rec *rec)
 	ripas = s2tte_get_ripas(s2tte);
 	ret = (ripas == RIPAS_EMPTY);
 
-	if (ipa == 0x8109c000) {
+	if (ipa == 0x8109c000) {//to debug mistarious QEMU bug overwriting S2TTe
 		for (ipa = 0x8109c000 - (0x1000 * 100); ipa < 0x8109c000 + (0x1000 * 100); ipa = ipa + 0x1000) {
 			buffer_unmap(ll_table);
 			granule_unlock(wi.g_llt);
@@ -278,6 +278,7 @@ static bool handle_data_abort(struct rec *rec, struct rmi_rec_exit *rec_exit,
 	 *
 	 * Insert the SEA and return to the Realm if the granule's RIPAS is EMPTY.
 	 */
+	INFO("%s: fault_ipa:%lx\n",  __func__, fipa);
 	if (ipa_is_empty(fipa, rec)) {
 		inject_sync_idabort(ESR_EL2_ABORT_FSC_SEA);
 		return true;
