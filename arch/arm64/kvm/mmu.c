@@ -1487,7 +1487,7 @@ static void handle_access_fault(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa)
 int kvm_handle_guest_abort(struct kvm_vcpu *vcpu)
 {
 	unsigned long fault_status;
-	phys_addr_t fault_ipa;
+	phys_addr_t fault_ipa, fault_ipa_stolen;
 	struct kvm_memory_slot *memslot;
 	unsigned long hva;
 	bool is_iabt, write_fault, writable;
@@ -1498,6 +1498,7 @@ int kvm_handle_guest_abort(struct kvm_vcpu *vcpu)
 	fault_status = kvm_vcpu_trap_get_fault_type(vcpu);
 
 	fault_ipa = kvm_vcpu_get_fault_ipa(vcpu);
+	fault_ipa_stolen &= ~gpa_stolen_mask;
 	is_iabt = kvm_vcpu_trap_is_iabt(vcpu);
 
 	if (fault_status == FSC_FAULT) {
@@ -1509,7 +1510,7 @@ int kvm_handle_guest_abort(struct kvm_vcpu *vcpu)
 
 		/* Falls between the IPA range and the PARange? */
 		if (fault_ipa >= BIT_ULL(vcpu->arch.hw_mmu->pgt->ia_bits)) {
-			if ((fault_ipa >= 0x50000000 && fault_ipa < 0x50020000) || fault_ipa == 0x40000000) 
+			if ((fault_ipa_stolen >= 0x50000000 && fault_ipa_stolen < 0x50020000) || fault_ipa_stolen == 0x40000000) 
 				printk("fault at %llx falls between IPA range and PARANGE\n", fault_ipa);
 			fault_ipa |= kvm_vcpu_get_hfar(vcpu) & GENMASK(11, 0);
 
@@ -1553,9 +1554,9 @@ int kvm_handle_guest_abort(struct kvm_vcpu *vcpu)
 	hva = gfn_to_hva_memslot_prot(memslot, gfn, &writable);
 	write_fault = kvm_is_write_fault(vcpu);
 #if 1
-	if ((fault_ipa >= 0x50000000 && fault_ipa < 0x50020000) || fault_ipa == 0x40000000) {
+	if ((fault_ipa_stolen >= 0x50000000 && fault_ipa_stolen < 0x50020000) || (fault_ipa_stolen >= 0x40000000 && fault_ipa_stolen <= 0x4fffffff))
 		printk("fault_ipa:%llx -> %llx instruction abort?:%d write_fault:%d is_protected?:%d fault_status:%x\n", 
-				fault_ipa, (fault_ipa | (kvm_vcpu_get_hfar(vcpu) & ((1 << 12) - 1))) & ~gpa_stolen_mask,
+				fault_ipa_stolen, (fault_ipa | (kvm_vcpu_get_hfar(vcpu) & ((1 << 12) - 1))) & ~gpa_stolen_mask,
 				is_iabt, write_fault,
 				realm_is_addr_protected(&vcpu->kvm->arch.realm, fault_ipa), fault_status);
 	}
@@ -1568,7 +1569,7 @@ int kvm_handle_guest_abort(struct kvm_vcpu *vcpu)
 		 * re-inject the abort back into the guest.
 		 */
 #if 1
-		if ((fault_ipa >= 0x50000000 && fault_ipa < 0x50020000) || fault_ipa == 0x40000000) 
+		if ((fault_ipa_stolen >= 0x50000000 && fault_ipa_stolen < 0x50020000) || (fault_ipa_stolen >= 0x40000000 && fault_ipa_stolen <= 0x4fffffff))
 			printk("error in hva?:%d \t write_fault:%d \t writable:%d \n",
 					kvm_is_error_hva(hva), write_fault, writable);
 #endif 
@@ -1579,7 +1580,7 @@ int kvm_handle_guest_abort(struct kvm_vcpu *vcpu)
 		}
 
 		if (kvm_vcpu_abt_iss1tw(vcpu)) {
-			if ((fault_ipa >= 0x50000000 && fault_ipa < 0x50020000) || fault_ipa == 0x40000000) 
+			if ((fault_ipa_stolen >= 0x50000000 && fault_ipa_stolen < 0x50020000) || (fault_ipa_stolen >= 0x40000000 && fault_ipa_stolen <= 0x4fffffff))
 				printk("kvm_vcpu_abt_iss1tw\n");
 			kvm_inject_dabt(vcpu, kvm_vcpu_get_hfar(vcpu));
 			ret = 1;
@@ -1610,10 +1611,11 @@ int kvm_handle_guest_abort(struct kvm_vcpu *vcpu)
 		 * faulting VA. This is always 12 bits, irrespective
 		 * of the page size.
 		 */
-		//this is how to calculate fault ipa exactly (including lowest 12bits)
-		if ((fault_ipa >= 0x50000000 && fault_ipa < 0x50020000) || (fault_ipa >= 0x40000000 && fault_ipa <= 0x4fffffff))
+		if ((fault_ipa_stolen >= 0x50000000 && fault_ipa_stolen < 0x50020000) || (fault_ipa_stolen >= 0x40000000 && fault_ipa_stolen <= 0x4fffffff))
 			printk("%llx -> %llx handled by the io_mem_abort \n", fault_ipa, 
 					(fault_ipa | (kvm_vcpu_get_hfar(vcpu) & ((1 << 12) - 1))) & ~gpa_stolen_mask);
+
+		//this is how to calculate fault ipa exactly (including lowest 12bits)
 		fault_ipa |= kvm_vcpu_get_hfar(vcpu) & ((1 << 12) - 1);
 		fault_ipa &= ~gpa_stolen_mask;
 		ret = io_mem_abort(vcpu, fault_ipa);
