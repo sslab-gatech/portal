@@ -1498,7 +1498,7 @@ int kvm_handle_guest_abort(struct kvm_vcpu *vcpu)
 	fault_status = kvm_vcpu_trap_get_fault_type(vcpu);
 
 	fault_ipa = kvm_vcpu_get_fault_ipa(vcpu);
-	fault_ipa_stolen &= ~gpa_stolen_mask;
+	fault_ipa_stolen = fault_ipa & ~gpa_stolen_mask;
 	is_iabt = kvm_vcpu_trap_is_iabt(vcpu);
 
 	if (fault_status == FSC_FAULT) {
@@ -1556,7 +1556,7 @@ int kvm_handle_guest_abort(struct kvm_vcpu *vcpu)
 #if 1
 	if ((fault_ipa_stolen >= 0x50000000 && fault_ipa_stolen < 0x50020000) || (fault_ipa_stolen >= 0x40000000 && fault_ipa_stolen <= 0x4fffffff)) {
 		printk("fault_ipa:%llx -> %llx instruction abort?:%d write_fault:%d is_protected?:%d fault_status:%x\n", 
-				fault_ipa_stolen, (fault_ipa | (kvm_vcpu_get_hfar(vcpu) & ((1 << 12) - 1))) & ~gpa_stolen_mask,
+				fault_ipa, (fault_ipa | (kvm_vcpu_get_hfar(vcpu) & ((1 << 12) - 1))) & ~gpa_stolen_mask,
 				is_iabt, write_fault,
 				realm_is_addr_protected(&vcpu->kvm->arch.realm, fault_ipa), fault_status);
 	}
@@ -1568,20 +1568,12 @@ int kvm_handle_guest_abort(struct kvm_vcpu *vcpu)
 		 * anything about this (there's no syndrome for a start), so
 		 * re-inject the abort back into the guest.
 		 */
-#if 1
-		if ((fault_ipa_stolen >= 0x50000000 && fault_ipa_stolen < 0x50020000) || (fault_ipa_stolen >= 0x40000000 && fault_ipa_stolen <= 0x4fffffff))
-			printk("error in hva?:%d \t write_fault:%d \t writable:%d \n",
-					kvm_is_error_hva(hva), write_fault, writable);
-#endif 
-
 		if (is_iabt) {
 			ret = -ENOEXEC;
 			goto out;
 		}
 
 		if (kvm_vcpu_abt_iss1tw(vcpu)) {
-			if ((fault_ipa_stolen >= 0x50000000 && fault_ipa_stolen < 0x50020000) || (fault_ipa_stolen >= 0x40000000 && fault_ipa_stolen <= 0x4fffffff))
-				printk("kvm_vcpu_abt_iss1tw\n");
 			kvm_inject_dabt(vcpu, kvm_vcpu_get_hfar(vcpu));
 			ret = 1;
 			goto out_unlock;
