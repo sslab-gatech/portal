@@ -1611,14 +1611,16 @@ int kvm_handle_guest_abort(struct kvm_vcpu *vcpu)
 		 * faulting VA. This is always 12 bits, irrespective
 		 * of the page size.
 		 */
-		if ((fault_ipa_stolen >= 0x50000000 && fault_ipa_stolen < 0x50020000) || (fault_ipa_stolen >= 0x40000000 && fault_ipa_stolen <= 0x4fffffff))
-			printk("%llx -> %llx handled by the io_mem_abort \n", fault_ipa, 
-					(fault_ipa | (kvm_vcpu_get_hfar(vcpu) & ((1 << 12) - 1))) & ~gpa_stolen_mask);
 
 		//this is how to calculate fault ipa exactly (including lowest 12bits)
 		fault_ipa |= kvm_vcpu_get_hfar(vcpu) & ((1 << 12) - 1);
 		fault_ipa &= ~gpa_stolen_mask;
 		ret = io_mem_abort(vcpu, fault_ipa);
+		if ((fault_ipa >= 0x50000000 && fault_ipa < 0x50020000) || (fault_ipa >= 0x40000000 && fault_ipa <= 0x4fffffff))
+			printk("%llx -> %llx handled by the io_mem_abort \n", 
+					kvm_vcpu_get_fault_ipa(vcpu),
+					fault_ipa);
+
 		goto out_unlock;
 	}
 
