@@ -1554,7 +1554,7 @@ int kvm_handle_guest_abort(struct kvm_vcpu *vcpu)
 	hva = gfn_to_hva_memslot_prot(memslot, gfn, &writable);
 	write_fault = kvm_is_write_fault(vcpu);
 #if 1
-	if ((fault_ipa_stolen >= 0x50000000 && fault_ipa_stolen < 0x50020000) || (fault_ipa_stolen >= 0x40000000 && fault_ipa_stolen <= 0x4fffffff))
+	if ((fault_ipa_stolen >= 0x50000000 && fault_ipa_stolen < 0x50020000) || (fault_ipa_stolen >= 0x40000000 && fault_ipa_stolen <= 0x4fffffff)) {
 		printk("fault_ipa:%llx -> %llx instruction abort?:%d write_fault:%d is_protected?:%d fault_status:%x\n", 
 				fault_ipa_stolen, (fault_ipa | (kvm_vcpu_get_hfar(vcpu) & ((1 << 12) - 1))) & ~gpa_stolen_mask,
 				is_iabt, write_fault,
