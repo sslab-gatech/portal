@@ -1092,6 +1092,7 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu)
 
 	//GUEST needs to be involved
 	phys_addr_t fault_ipa = kvm_vcpu_get_fault_ipa(vcpu);
+	phys_addr_t fault_ipa_stolen = fault_ipa & ~(kvm_gpa_stolen_bits(vcpu->kvm));
 	if ((fault_ipa >= 0x50000000 && fault_ipa < 0x50020000) || (fault_ipa >= 0x40000000 && fault_ipa <= 0x4fffffff))
 		printk("Return to user?:%d exit_reason:%d\n", ret, vcpu->run->exit_reason);
 
