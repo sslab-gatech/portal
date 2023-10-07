@@ -181,7 +181,10 @@ static bool complete_mmio_emulation(struct rec *rec, struct rmi_rec_entry *rec_e
 Because rec enter always checks if there is a pending MMIO emulation should be 
 reflected to the realm, it first checks if REC_ENTRY_FLAG_EMUL_MMIO flag was set
 by the host. Most of the case it will not be set, and the function returns true
-to continue realm execution. 
+to continue realm execution. However, if the host sets the flag, then the RMM 
+should check if the realm has exit due to the emulatable data abort exit by 
+checking the last_run_info. This is to prevent host from maliciously feeding 
+input to the realm.
 
 
 

@@ -405,8 +405,8 @@ static bool handle_exception_sync(struct rec *rec, struct rmi_rec_exit *rec_exit
                 return true;
 ```
 
-Because the RMI exception exits the Realm and jumps into the RMM it will be 
-handled by the ESR_EL2_EC_SMC case. 
+Because the realmn exits due to RSI which is part of the SMC, the exit will be 
+handled as the ESR_EL2_EC_SMC case. 
 
 ```cpp
 static bool handle_realm_rsi(struct rec *rec, struct rmi_rec_exit *rec_exit)
@@ -893,7 +893,7 @@ unsigned long s2tte_create_assigned_empty(unsigned long pa, long level)
 Based on the request, the RIPAS is changed to S2TTE_INVALID_RIPAS_EMPTY. Note 
 that the NS bit is not set for the s2tte. 
 
-## Return to Host again
+## Return to Host again from RMI
 ```cpp
 static int set_ipa_state(struct kvm_vcpu *vcpu,
                          unsigned long ipa,
@@ -916,8 +916,11 @@ return from the RMI success and the changed ripas was EMPTY. Because the changed
 RIPAS is EMPTY not RAM, which is the result of the previous RSI call from the 
 realm. If the RIPAS has been changed from the RAM to EMPTY, the page cannot be 
 used for DATA page, unless RMI_RTT_SET_RIPAS(RAM) is invoked for that page.
-Because realm wants to utilize the IPA whose ripas was changed from the RAM to 
-EMPTY as the untrusted, host destroy the rtt of that ipa. 
+Because realm does not want to utilize the IPA, host destroy the rtt of the ipa. 
+See the two if statements. First condition checks the return value from the RMI.
+If the return value was RMI_SUCCESS which is zero, then the condition is true. 
+Furthermore, it checks the requested ripas to be changed, if the ripas was set 
+as empty, which is zero, then the condition passes and unmap the range. 
 
 ```cpp
 void kvm_realm_unmap_range(struct kvm *kvm, unsigned long ipa, u64 size)
@@ -1051,7 +1054,7 @@ rmi_rtt_read_entry function ask RMM to returns the state of the target page.
 Because the previous page requested to be changed from secure IPA to untrusted
 IPA is still ASSIGNED, but empty, the state of the target page should be 
 RMI_ASSIGNED. Therefore, it further undelegate and destroy page through calling 
-RMIS
+RMIs
 
 ```cpp
 static void realm_destroy_undelegate_range(struct realm *realm,
@@ -1255,6 +1258,106 @@ s2tt. Therefore, the raised fault should be handled by the RMM and the s2tt
 should be patched accordingly to make the realm access the untrusted host memory.
 
 
+## Mapping untrusted IPA to the page 
+How the fault raised in the realm due to accessing untrusted can be resolved? 
+After change_page_range is invoked for the DMA range, the IPA originally used 
+for the DMA is moved to the upper half by changing stage 1 page table of the 
+realm. However, accessing this page from the realm through the virtual address
+should generate the fault, cause there is no s2tt mapping. That is what I 
+described about how the realm allocates untrusted IPA for DMA. Then how the host
+handles the fault generated due to accessing it? 
+
+### Revisit host for handling fault-ipa
+When we try to remind of how the host handles the fault_ipa, first it checks if 
+there is any memslot translating the fault-ipa (IPA) to HVA. If not, it is 
+treated as MMIO and first handled by the kernel. If it cannot be handled by the 
+kernel itself, it exits to the user and ask handling the MMIO. However, if there
+is a memslot for the faultin IPA, then the KVM treats the fault-ipa as non-MMIO
+and tries to generate mapping from the faultin IPA to HPA because memslot can 
+be utilized to retrieve HPA from HVA mapped to the IPA.
+
+Then what happens after the trusted IPA is translated into untrusted IPA after 
+the RSI to reserve untrusted DMA space for realm? Note that the faultin ipa is 
+not exactly same as before because the MSB is set because the realm changes the 
+stage 1 page table. Yeah there is a potential chance that this changed IPA could 
+be treated as MMIO address if the entire address including the MSB is used to 
+locate the memslot for the IPA. Intuitively, we can assume that the IPA without
+the MSB would be used make the realm treat it as non-mmio address to generate 
+proper mapping :) But let's to be clear by checking the code!
+
+
+```cpp
+int kvm_handle_guest_abort(struct kvm_vcpu *vcpu)
+{               
+        unsigned long fault_status;
+        phys_addr_t fault_ipa, fault_ipa_stolen;
+        struct kvm_memory_slot *memslot;
+        unsigned long hva;
+        bool is_iabt, write_fault, writable;
+        gpa_t gpa_stolen_mask = kvm_gpa_stolen_bits(vcpu->kvm);
+        gfn_t gfn;
+        int ret, idx;
+
+        fault_status = kvm_vcpu_trap_get_fault_type(vcpu);
+
+	//1
+        fault_ipa = kvm_vcpu_get_fault_ipa(vcpu);
+	......
+
+	//2
+	gfn = (fault_ipa & ~gpa_stolen_mask) >> PAGE_SHIFT;
+        memslot = gfn_to_memslot(vcpu->kvm, gfn);
+        hva = gfn_to_hva_memslot_prot(memslot, gfn, &writable);
+        write_fault = kvm_is_write_fault(vcpu);
+
+	if (kvm_is_error_hva(hva) || (write_fault && !writable)) {
+		......
+		//3
+		fault_ipa |= kvm_vcpu_get_hfar(vcpu) & ((1 << 12) - 1);
+                fault_ipa &= ~gpa_stolen_mask;
+                ret = io_mem_abort(vcpu, fault_ipa);
+                goto out_unlock;
+        }
+
+	......
+	//4
+	ret = user_mem_abort(vcpu, fault_ipa, memslot, hva, fault_status);
+	......
+}
+```
+
+There are four points that are relevant to faultin ipa as shown in the code and 
+comments. Basically the fault_ipa field is the ipa as it is without masking out 
+the MSB. Therefore, by checking fault_ipa we can know whether it is untrusted 
+or trusted IPA. When you look at the second point, the gfn is retrieved from the 
+fault_ipa by masking out the trusted/untrusted bit. Therefore, whether the
+faultin IPA is in trusted or untrusted, gfn will be same if the other bits
+except the MSB are identical. Note that this masked out IPA is used to search 
+memslot mapping the gfn to hva. If there is an memslot, then the if condition
+checking kvm_is_error_hva will return false, which means it is not the address
+requiring MMIO emulation. 
+
+This is important. Remind that the fault happen after the ripas change to 
+allocate untrusted DMA memory. In other words, this indicate that there is a 
+memslot translating the gfn to hva because the gfn was previously mapped to the 
+trusted IPA. Regardless of MSB indicating the trusted or untrusted for IPA, if 
+the IPA has been mapped to the trusted originally, then there should be a 
+memslot for it! If the KVM haven't deleted this memslot while destroying the 
+page through RMI, the memslot should exist. Therefore, the IPA which was mapped 
+to trusted before, but currently mapped to untrusted can be treated as non-MMIO
+memory, and its fault will be handled by user_mem_abort not by the io_mem_abort. 
+
+Also note that the fault_ipa itself it passed to the user_mem_abort without 
+masking out the MSB. However, before invoking the io_mem_abort, it masks out the 
+MSB from the fault_ipa. It is easy to find the reason when you think about it 
+carefully. io_mem_abort needs the IPA to check if it is within MMIO range and 
+it doesn't need exact IPA including the trusted/untrusted bit because the actual
+mapping between the fault_ipa to HPA will not be established as a result. 
+However, if the faultin_ipa is non-MMIO address, then the faultin IPA should be 
+mapped in the stage 2 page table to allow the realm access untrusted IPA. 
+Therefore, it needs entire IPA including the MSB is necessary. If the IPA is 
+passed to the user_mem_abort after masking out the MSB, then it will establish
+mapping from trusted IPA to HPA which will not be accessed by the realm. 
 
 
 ## Questions & Answers

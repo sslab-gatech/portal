@@ -1494,7 +1494,9 @@ static int vfio_container_init(struct kvm *kvm)
 Generally, there would be two KVM_MEM_TYPE_RAM memory banks: one for the guest 
 kernel and the other for the para-virtualized space. For those two memory 
 regions or more, the vfio_map_mem_bank function is invoked and register GPA in 
-IOMMU. 
+IOMMU. Note that the kvmtool maintains all memory region assigned to the VM in 
+kvm->mem_banks. Take a look at kvm__register_mem function together to understand
+how the kvmtool manages the memory mapped to the vm.
 
 ```cpp
 static int vfio_map_mem_bank(struct kvm *kvm, struct kvm_mem_bank *bank, void *data)
@@ -1521,8 +1523,10 @@ static int vfio_map_mem_bank(struct kvm *kvm, struct kvm_mem_bank *bank, void *d
 
 KVMTOOL iterates all KVM_MEM_TYPE_RAM and invokes ioctl to vfio_container. Note 
 that dma_map variable conveys memory information that needs to be mapped in the 
-IOMMU to the kernel driver. Note that the guest_phys_addr (iova) and host_addr 
-(mapped to the guest) are passed to the driver altogether. 
+IOMMU to the kernel driver. Note that the guest_phys_addr is used as the iova,
+and host_addr mapped to that GPA is used as vaddr. By passing these two values
+to the kernel, it can retrieve the physical address mapped to the vaddr and bind
+iova(GPA) to HPA through the IOMMU mapping. We will see!
 
 ### kernel-side handling for VFIO_IOMMU_MAP_DMA
 The IOMMU should be controlled by the host kernel, and VFIO_IOMMU_MAP_DMA ioctl
@@ -1561,8 +1565,9 @@ static long vfio_fops_unl_ioctl(struct file *filep,
         return ret;
 }
 ```
-However, there is no VFIO_IOMMU_MAP_DMA ioctl function, and it invokes the ioctl 
-of the driver maintained by the container. 
+
+Since it has VFIO_IOMMU_MAP_DMA ioctl function, the ioctl of the driver 
+maintained by the container is invoked. 
 
 
 ```cpp
@@ -1608,6 +1613,17 @@ static int vfio_iommu_type1_map_dma(struct vfio_iommu *iommu,
 ```
 
 ### Main function to do DMA for guest vm mem
+As the kernel driver has capability to manipulate the IOMMU page table, now it 
+can generate mapping from the vfio to the HPA. We already have the vfio address
+passed from the kvmtool, which is the GPA region of the guest vm. Since we only
+have access for the HVA mapped to the GPA, it should retrieve the HPA mapped to
+the GPA. Since kernel has page table accesses, it can easily retrieve the HPA. 
+
+The function vfio_dma_do_map is responsible for pinning the physical pages of 
+the HVA used by kvmtool. It then invokes vfio_iommu_map to perform the mapping 
+of IOVA to HPA. This function subsequently calls iommu_map and, finally, the map
+function within the iommu_ops.
+
 ```cpp
 static int vfio_dma_do_map(struct vfio_iommu *iommu,
                            struct vfio_iommu_type1_dma_map *map)
@@ -1740,15 +1756,48 @@ out_unlock:
         mutex_unlock(&iommu->lock);
         return ret;
 }
+```
 
+\XXX{Give more details about vfio_dma_do_map later how it generates mmio mapping}
+
+```cpp
+static struct vfio_dma *vfio_find_dma(struct vfio_iommu *iommu,
+                                      dma_addr_t start, size_t size)
+{
+        struct rb_node *node = iommu->dma_list.rb_node;
+
+        while (node) {
+                struct vfio_dma *dma = rb_entry(node, struct vfio_dma, node);
+
+                if (start + size <= dma->iova)
+                        node = node->rb_left;
+                else if (start >= dma->iova + dma->size)
+                        node = node->rb_right;
+                else
+                        return dma;
+        }
+                 
+        return NULL;
+}
 
 ```
 
 
 
-
 ## Register VFIO BAR as KVM memory
-### KVMTOOl
+To generate the mapping from the GPA (IPA) to the BAR region (HPA) of the 
+platform, the KVM should have mapping from the GPA to HVA. In details, when the 
+guest exits due to accessing the BAR region of the guest (emulated), it exits to
+the host, and host checks if there is a memslot that can translate the faultin 
+IPA. IF there is a memslot, then the KVM can map the faultin IPA to the HPA!
+The most important job of the vfio device is to generate this memslot mapping.
+To allow the guest VM to access the BAR regions, vfio-pci driver maps the BAR 
+region in HPA and generate HVA (through ioremap). Then it asks the KVM driver 
+to generate memslot for IPA (mapped for the guest BAR) to the generated HVA. 
+Although it passes the HVA, it will be translated to the GPA by the KVM and the 
+mapping can be successfully established. 
+
+### Configure vfio devices focusing on pci
 ```cpp
 static int vfio__init(struct kvm *kvm)
 {       
@@ -1777,7 +1826,6 @@ static int vfio__init(struct kvm *kvm)
 }       
 ```
 
-### Configuring VFIO devices 
 ```cpp
 static int vfio_configure_devices(struct kvm *kvm)
 {
@@ -1854,14 +1902,100 @@ err_close_device:
 ```
 First of all, it invokes VFIO_GROUP_GET_DEVICE_FD ioctl to get the descriptor 
 of the device. Through this ioctl call, kernel opens the device file matching 
-the provided device name in the group. If there is matching device, it returns.
+the provided device name in the group. If there is matching device, it returns
+the associated file descriptor. The return value will be stored in vdev->fd.
 
-To initialize the vfio devices, first it asks the kernel to give vfio device 
-information through VFIO_DEVICE_GET_INFO ioctl. The information includes the 
-number of regions and IRQ assigned to the device. It allocates the regions array
-and assign it to vdev. As we assume that the vfio device is PCI, it will invoke 
-vfio_pci_setup_device function. Note that this function initialize information 
-of the pdev such as regions. 
+### Retrieve PCIe specific information of the device
+To configure the vfio devices, it needs extra information about the vfio device.
+Through VFIO_DEVICE_GET_INFO ioctl it can retrieve information of the vfio
+device. Because we assume that the target device is bind to vfio-pci driver, it 
+will invoke vfio_pci_ioctl_get_info which is the handler function of the 
+VFIO_DEVICE_GET_INFO
+
+
+```cpp
+static int vfio_pci_ioctl_get_info(struct vfio_pci_core_device *vdev,
+                                   struct vfio_device_info __user *arg)
+{       
+        unsigned long minsz = offsetofend(struct vfio_device_info, num_irqs);
+        struct vfio_device_info info;
+        struct vfio_info_cap caps = { .buf = NULL, .size = 0 };
+        unsigned long capsz;
+        int ret;
+        
+        /* For backward compatibility, cannot require this */
+        capsz = offsetofend(struct vfio_iommu_type1_info, cap_offset);
+                
+        if (copy_from_user(&info, arg, minsz))
+                return -EFAULT;
+        
+        if (info.argsz < minsz)
+                return -EINVAL;
+                
+        if (info.argsz >= capsz) {
+                minsz = capsz;
+                info.cap_offset = 0;
+        }
+
+        info.flags = VFIO_DEVICE_FLAGS_PCI;
+
+        if (vdev->reset_works)
+                info.flags |= VFIO_DEVICE_FLAGS_RESET;
+        
+        info.num_regions = VFIO_PCI_NUM_REGIONS + vdev->num_regions;
+        info.num_irqs = VFIO_PCI_NUM_IRQS;
+        
+        ret = vfio_pci_info_zdev_add_caps(vdev, &caps);
+        if (ret && ret != -ENODEV) {
+                pci_warn(vdev->pdev,
+                         "Failed to setup zPCI info capabilities\n");
+                return ret;
+        }
+
+        if (caps.size) {
+                info.flags |= VFIO_DEVICE_FLAGS_CAPS;
+                if (info.argsz < sizeof(info) + caps.size) {
+                        info.argsz = sizeof(info) + caps.size;
+                } else {
+                        vfio_info_cap_shift(&caps, sizeof(info));
+                        if (copy_to_user(arg + 1, caps.buf, caps.size)) {
+                                kfree(caps.buf);
+                                return -EFAULT;
+                        }
+                        info.cap_offset = sizeof(*arg);
+                }
+
+                kfree(caps.buf);
+        }
+
+        return copy_to_user(arg, &info, minsz) ? -EFAULT : 0;
+}
+
+```
+The information includes the number of regions and IRQ assigned to the device. 
+It allocates the regions array and assign it to vdev. 
+
+
+### Setup PCIe specific information 
+After retrieving the device information from the kernel side, it invokes the 
+vfio_pci_setup_device if the device's type is VFIO_DEVICE_PCI. As PCIe device 
+has its own semantic such as PCI config space and BAR used in communication with
+the device, we will focus on how vfio-pci device driver allows the VM to 
+communicate seamlessly through those channels. 
+
+
+```cpp
+static int vfio_configure_device(struct kvm *kvm, struct vfio_device *vdev)
+{       
+	......
+        /* Now for the bus-specific initialization... */
+        switch (vdev->params->type) {
+        case VFIO_DEVICE_PCI:
+                BUG_ON(!(vdev->info.flags & VFIO_DEVICE_FLAGS_PCI));
+                ret = vfio_pci_setup_device(kvm, vdev);
+	......
+}
+```
 
 
 ```cpp
@@ -1895,12 +2029,14 @@ int vfio_pci_setup_device(struct kvm *kvm, struct vfio_device *vdev)
         return 0;
 }
 ```
+Note that this function initialize information of the pdev such as regions. 
 
-### Retrieve BAR regions and PCI header information 
-As we initialized the VFIO and bind the devices to the VFIO PCI driver, we can 
-ask kernel to give information of the devices through the ioctl. Below is the 
-kernel documentation about the VFIO pci devices regarding to its interface to 
-bind/retrieve information of the device. 
+### Brief tutorial about the VFIO bus drivers.
+Before we take a look at how kvmtool communicate with the vfio-pci driver to 
+retrieve further information and set-up the device, we should understand how the
+vfio device driver communicate with the user-space kvmtool, which is the ioctl
+and device operations through the device file. Read below descriptions of the 
+vfio driver carefully, excerpted from the kernel documentation.
 
 ```cpp
 VFIO bus drivers, such as vfio-pci make use of only a few interfaces
@@ -1950,8 +2086,9 @@ own VFIO_DEVICE_GET_REGION_INFO ioctl.
 ```
 
 Based on the documentation, we can understand that the device file serve as an
-very important interface between the user and kernel allowing the kvmtool to 
-access the device specific information. 
+very important interface between the user and kernel allowing the user (e.g., 
+kvmtool) to access the device specific information. Below vfio_pci_ops is 
+registered as a vfio_device_ops of the vfio-pci device driver. 
 
 ```cpp
 static const struct vfio_device_ops vfio_pci_ops = {
@@ -1973,6 +2110,9 @@ static const struct vfio_device_ops vfio_pci_ops = {
 };
 ```
 
+### Retrieve PCI header information 
+Let's see how the vfio-pci driver allows the user to access PCIe header info
+through the vfio-pci device driver. 
 
 ```cpp
 static int vfio_pci_configure_dev_regions(struct kvm *kvm,
@@ -2026,10 +2166,8 @@ static int vfio_pci_configure_dev_regions(struct kvm *kvm,
                                          vfio_pci_bar_deactivate, vdev);
 }
 ```
-Two important information about the pci device, the bar region and header of the 
-pci device, is retrieved from the below function. 
 
-## Retrieving PCI config space info (VFIO_DEVICE_GET_REGION_INFO)
+### Retrieving PCI config space info (VFIO_DEVICE_GET_REGION_INFO)
 ```cpp
 static int vfio_pci_parse_cfg_space(struct vfio_device *vdev)
 {                                         
@@ -2077,13 +2215,19 @@ static int vfio_pci_parse_cfg_space(struct vfio_device *vdev)
         return 0;
 }
 ```
-To read the header information, it reads the vfio device file. However, before 
-actually reading the header information, it should know the offset of the header
-because the read function read information based on the provided offset. 
-Therefore, it first invokes ioctl to vfio pci device to retrieve information 
-including offset of the header from the kernel.
 
-**Kernel Side**
+As described in [[]], reading pci device specific information is achieved 
+through the registered file operations such as read (pread in this code). When 
+it passes proper offset of the region that wants to read through the read system
+call to the file descriptor of the vfio-pci device, the kernel driver will read 
+information from the PCI device memory. 
+
+The proper offset of the region it wants to read can be retrieved from the 
+vfio-pci driver through the ioctl call (VFIO_DEVICE_GET_REGION_INFO). In this 
+case, it wants to read PCI header, so it configures index vfio_region_info as 
+VFIO_PCI_CONFIG_REGION_INDEX and pass it to the driver.
+
+**Kernel side of the VFIO_DEVICE_GET_REGION_INFO**
 ```cpp
 static int vfio_pci_ioctl_get_region_info(struct vfio_pci_core_device *vdev,
                                           struct vfio_region_info __user *arg)
@@ -2123,7 +2267,8 @@ static int vfio_pci_ioctl_get_region_info(struct vfio_pci_core_device *vdev,
                                 ret = msix_mmappable_cap(vdev, &caps);
                                 if (ret)
                                         return ret;
-                        }
+
+					}
                 }
 
                 break;
@@ -2226,11 +2371,14 @@ static int vfio_pci_ioctl_get_region_info(struct vfio_pci_core_device *vdev,
         return copy_to_user(arg, &info, minsz) ? -EFAULT : 0;
 }
 ```
+The kernel driver simply returns the offset, size, and flags information of 
+different regions to the user. 
 
-### Reading bar information through pread
-After retrieving the information of the pci device, it can now read the PCI 
-related information through the read. Let's see the how kernel allows the user 
-to read header information through read. 
+### Reading PCI memory through pread
+After retrieving the offset of region that we want to read from the PCI device, 
+we can now read the PCI information indirectly thorough the pread to the file 
+descriptor of the target vfio-pci device. Let's see the how kernel allows the 
+user to read header information through read. 
 
 ```cpp
 ssize_t vfio_pci_core_read(struct vfio_device *core_vdev, char __user *buf,
@@ -2244,6 +2392,10 @@ ssize_t vfio_pci_core_read(struct vfio_device *core_vdev, char __user *buf,
         
         return vfio_pci_rw(vdev, buf, count, ppos, false);
 }       
+
+vfio_pci_core_read function is called when the read system call is invoked 
+through the vfio-pci device. Refer to [[]]. The actual read of the pci memory
+is accomplished by vfio_pci_rw. 
 
 static ssize_t vfio_pci_rw(struct vfio_pci_core_device *vdev, char __user *buf,
                            size_t count, loff_t *ppos, bool iswrite)
@@ -2292,13 +2444,74 @@ static ssize_t vfio_pci_rw(struct vfio_pci_core_device *vdev, char __user *buf,
         return ret;
 }
 ```
+
 As described, based on the offset, switch allows user process to read different
-information of the pci device. 
+information of the pci device. Because the current request wants to read the 
+pci header information, vfio_pci_config_rw will be invoked and read PCI info. 
+I will not describe further details. 
 
+### PCI device header
+Note that pread passes pointer of the pdev->hdr to store the header information.
 
-### Read BAR Information and locating BAR region at guest
-Lets go back to vfio_pci_configure information and see how it retrieves the 
+```cpp
+struct pci_device_header {              
+        /* Configuration space, as seen by the guest */
+        union { 
+                struct { 
+                        u16             vendor_id;
+                        u16             device_id; 
+                        u16             command;
+                        u16             status;
+                        u8              revision_id;
+                        u8              class[3];
+                        u8              cacheline_size;
+                        u8              latency_timer;
+                        u8              header_type;
+                        u8              bist;
+                        u32             bar[6];
+                        u32             card_bus;
+                        u16             subsys_vendor_id;
+                        u16             subsys_id;
+                        u32             exp_rom_bar;
+                        u8              capabilities;
+                        u8              reserved1[3];
+                        u32             reserved2;
+                        u8              irq_line;
+                        u8              irq_pin;
+                        u8              min_gnt;
+                        u8              max_lat;
+                        struct msix_cap msix;
+                        /* Used only by architectures which support PCIE */
+                        struct pci_exp_cap pci_exp;
+                        struct virtio_caps virtio;
+                } __attribute__((packed));
+                /* Pad to PCI config space size */
+                u8      __pad[PCI_DEV_CFG_SIZE];
+        };
+        
+        /* Private to lkvm */
+        u32                     bar_size[6];
+        bool                    bar_active[6];
+        bar_activate_fn_t       bar_activate_fn;
+        bar_deactivate_fn_t     bar_deactivate_fn;
+        void *data;
+        struct pci_config_operations    cfg_ops;
+        /*
+         * PCI INTx# are level-triggered, but virtual device often feature
+         * edge-triggered INTx# for convenience.
+         */
+        enum irq_type   irq_type;
+};
+```
+After the pread, the kvmtool can access the PCI device information through the
+pdev->hdr without accessing the PCI device config space everytime. 
+
+### Read BAR Information from pcie
+As we ask the vfio-pci device driver to read pci device specific information,
+such as the pci header, we can read the PCI BAR info through the same way. 
+Lets go back to vfio_pci_configure_dev_regions and see how it retrieves the 
 PCI BAR information.
+
 ```cpp
 static int vfio_pci_configure_dev_regions(struct kvm *kvm,                      
                                           struct vfio_device *vdev)             
@@ -2374,6 +2587,12 @@ static int vfio_pci_configure_bar(struct kvm *kvm, struct vfio_device *vdev,
 }
 ```
 
+Although the name is confusing to make reader misunderstand the above function, 
+the main role of it is retrieving information of BARs of the PCIe device not 
+modifying/configuring BARs. The information is retrieved through ioctl
+VFIO_DEVICE_GET_REGION_INFO and stored in the regions field of the vfio_device. 
+The end result we will have is the information of BARs saved in dev->regions. 
+
 ```cpp
 static int vfio_pci_get_region_info(struct vfio_device *vdev, u32 index,
                                     struct vfio_region_info *info)
@@ -2402,12 +2621,31 @@ static int vfio_pci_get_region_info(struct vfio_device *vdev, u32 index,
 }
 ```
 
-lkvm already knows the memory layout of the guest VM including where the PCI 
-address starts from and its size. Also, it has information of the PCI bar as a 
-result of ioctl to the pci-vfio driver. Therefore, It can easily retrieve the 
-guest physical address of the BAR register. 
+
+For each different architecture, it can have default memory map for different 
+region of the system. 
 
 ```cpp
+/*
+ * The memory map used for ARM guests (not to scale):
+ *
+ * 0      64K  16M     32M     48M            1GB       2GB
+ * +-------+----+-------+-------+--------+-----+---------+---......
+ * |  PCI  |////| plat  |       |        |     |         |
+ * |  I/O  |////| MMIO: | Flash | virtio | GIC |   PCI   |  DRAM
+ * | space |////| UART, |       |  MMIO  |     |  (AXI)  |
+ * |       |////| RTC,  |       |        |     |         |
+ * |       |////| PVTIME|       |        |     |         |
+ * +-------+----+-------+-------+--------+-----+---------+---......
+ */     
+
+#define ARM_MMIO_AREA           _AC(0x0000000001000000, UL)
+#define ARM_AXI_AREA            _AC(0x0000000040000000, UL)
+
+#define KVM_PCI_CFG_AREA        ARM_AXI_AREA
+#define ARM_PCI_CFG_SIZE        (1ULL << 28)
+#define KVM_PCI_MMIO_AREA       (KVM_PCI_CFG_AREA + ARM_PCI_CFG_SIZE)
+static u32 mmio_blocks                  = KVM_PCI_MMIO_AREA;
 u32 pci_get_mmio_block(u32 size)
 {               
         u32 block = ALIGN(mmio_blocks, size);
@@ -2416,8 +2654,15 @@ u32 pci_get_mmio_block(u32 size)
 }       
 ```
 
-###
+Also, because we have information of the PCI BAR retrieved from the pci-vfio 
+driver, such as the size of the bar, it can easily retrieve the guest physical
+address of the BAR. 
+
+### Fix up config space for guest
 Note that the retrieved BAR information is stored in the regions, not the bar.
+We want to make the guest XXX
+
+
 XXX: Why pdev->hdr_bar should be patched? Was it originally pointing to the 
 BAR of the host? and then it is patched to point to guest through this?
 
@@ -2455,38 +2700,20 @@ static int vfio_pci_fixup_cfg_space(struct vfio_device *vdev)
         
                 pdev->hdr.bar_size[i] = region->info.size;
         }       
+	......
 
-        /* I really can't be bothered to support cardbus. */
-        pdev->hdr.card_bus = 0;          
+```
+The first part patches the bar information in the header (hdr.bar) to make it 
+point to guest physical address of each bar. Also, because the BAR address not
+only presents its bus address, but also other information such as if the address
+is PIO or MEM. Therefore, based on the BAR type, it sets different flags 
+together with the address. There are other fix-up, but I will skip them and 
+jump into the patching part. 
 
-        /*
-         * Nuke the expansion ROM for now. If we want to do this properly,
-         * we need to save its size somewhere and map into the guest.
-         */
-        pdev->hdr.exp_rom_bar = 0;
-
-        /* Plumb in our fake MSI-X capability, if we have it. */
-        msix = pci_find_cap(&pdev->hdr, PCI_CAP_ID_MSIX);
-        if (msix) {
-                /* Add a shortcut to the PBA region for the MMIO handler */
-                int pba_index = VFIO_PCI_BAR0_REGION_INDEX + pdev->msix_pba.bar;
-                u32 pba_bar_offset = msix->pba_offset & PCI_MSIX_PBA_OFFSET;
-
-                pdev->msix_pba.fd_offset = vdev->regions[pba_index].info.offset +
-                                           pba_bar_offset;
-
-                /* Tidy up the capability */
-                msix->table_offset &= PCI_MSIX_TABLE_BIR;
-                if (pdev->msix_table.bar == pdev->msix_pba.bar) {
-                        /* Keep the same offset as the MSIX cap. */
-                        pdev->msix_pba.bar_offset = pba_bar_offset;
-                } else {
-                        /* PBA is at the start of the BAR. */
-                        msix->pba_offset &= PCI_MSIX_PBA_BIR;
-                        pdev->msix_pba.bar_offset = 0;
-                }
-        }
-
+```cpp
+static int vfio_pci_fixup_cfg_space(struct vfio_device *vdev)
+{               
+	......
         /* Install our fake Configuration Space */
         info = &vdev->regions[VFIO_PCI_CONFIG_REGION_INDEX].info;
         /*
@@ -2513,22 +2740,13 @@ static int vfio_pci_fixup_cfg_space(struct vfio_device *vdev)
 ```
 
 Note that info structure utilized to get the offset field, passed to the pwrite,
-is a info that we have retrieved from the pci driver before [cite]. Therefore, 
-the pwrite will overwrite the header of the device. vfio_pci_fixup_cfg_space
-function updates the pdev->hdr based on the pci device information of the guest 
-before calling pwrite. For example, it patches the bar address as the guest 
-physical address (pdev->hdr.bar[i] = base;).
-\XX{I don't know why it needs to fixup pdev->hdr..}
+is an info that we have retrieved from the pci driver before [cite]. Therefore, 
+the pwrite will overwrite the header of the device. Lastly, it updates the 
+cfg_ops. Then why we need to fix-up PCI header information, especially the BARs?
+XXXX
 
-
-### Register BAR regions (map bar (hpa) to hva)
-We have located the BAR, however, it doesn't mean that the BAR has been mapped 
-to virtual address. To pass the address to QEMU to be utilized later for 
-creating memslot, the hva should be provided, and the bar should be mapped in 
-the host virtual address space. Let's see how to map the bar through another 
-interface call to vfio driver, particularly mmap.  
-
-
+### MMAP GPA BAR to HVA
+Let's see the last part of the vfio_pci_configure_dev_regions.
 ```cpp
 static int vfio_pci_configure_dev_regions(struct kvm *kvm,                      
                                           struct vfio_device *vdev)             
@@ -2538,8 +2756,11 @@ static int vfio_pci_configure_dev_regions(struct kvm *kvm,
                                          vfio_pci_bar_deactivate, vdev); 
 }
 
-Note that the pdev->hdr is the updated header of the pci device reflecting info
-of the guest VM. 
+We have located the BAR, however, it doesn't mean that the BAR has been mapped 
+to virtual address. To make the memslot mapping, the pair of the gpa and hva is 
+necessary. Therefore, the BAR should be mapped in host virtual address space. 
+Let's see how to map the bar through another interface call to vfio driver,
+particularly mmap.  
 
 int pci__register_bar_regions(struct kvm *kvm, struct pci_device_header *pci_hdr,
                               bar_activate_fn_t bar_activate_fn,
@@ -2706,9 +2927,9 @@ int vfio_map_region(struct kvm *kvm, struct vfio_device *vdev,
 Note that mmap is called to the vdev->fd. Let's see how the pci-device driver 
 allows this mapping. Also the mmap address will be stored in the region as a 
 host_addr field. This address will be passed to the kvm to generate memslot 
-later. 
+later together with the GPA of the BAR. 
 
-### mmap support for mapping bar resources from user
+### VFIO mmap to establish GPA -> HVA mapping for BAR
 To map the bar region from the user space, it should interface with the kernel. 
 Through the mmap call, it can ask the kernel driver to map the region for user
 space. 
@@ -2787,8 +3008,12 @@ int vfio_pci_core_mmap(struct vfio_device *core_vdev, struct vm_area_struct *vma
 ```
 Instead of generating the mapping here, usually achieved by remap_pfn_range,
 it registers the operation to generate mapping as the fault happens to the 
-memory through the user virtual address. Therefore, when the user process access 
-this region through the mapped virtual address, because the page has not been 
+memory due to its accesses through user virtual address. 
+
+
+XXX
+At the time of fault,
+the HVA -> GPA mapping for the bar is generated. 
 actually mapped, it will raise the fault and invoke the allocated function. 
 
 ```cpp
@@ -2849,6 +3074,34 @@ up_out:
 ```
 
 
+###
+After generating the HVA mapped to the BAR, the KVMTOOL register this memory 
+region to the guest through the kvm module. 
+
+```cpp
+int vfio_map_region(struct kvm *kvm, struct vfio_device *vdev,
+                    struct vfio_region *region)
+{       
+	......
+        base = mmap(NULL, region->info.size, prot, MAP_SHARED, vdev->fd,
+                    region->info.offset);
+        if (base == MAP_FAILED) {
+                /* TODO: support sparse mmap */
+                vfio_dev_warn(vdev, "failed to mmap region %u (0x%llx bytes), falling back to trapping",
+                         region->info.index, region->info.size);
+                return vfio_setup_trap_region(kvm, vdev, region);
+        }
+        region->host_addr = base;
+        
+        ret = kvm__register_dev_mem(kvm, region->guest_phys_addr, map_size,
+                                    region->host_addr);
+        if (ret) {
+                vfio_dev_err(vdev, "failed to register region with KVM");
+                return ret;
+        }
+        
+        return 0;
+}
 
 ```cpp
 static inline int kvm__register_dev_mem(struct kvm *kvm, u64 guest_phys,
@@ -2970,10 +3223,7 @@ out:
 ```
 
 
-### KVM module side
-
-
-
+### KVM module side to set new user memory region
 ```cpp
 static long kvm_vm_ioctl(struct file *filp,
                            unsigned int ioctl, unsigned long arg)
@@ -3140,19 +3390,13 @@ int __kvm_set_memory_region(struct kvm *kvm,
 }
 ```
 
+As a result, the memslot that maps GPA of the BAR to the HVA. Because guest has 
+memslot for the BAR, whenever the guest accesses the BAR GPA, which makes the 
+data abort fault, the KVM module can tell there is a memslot for that address.
+If there is a memslot, then the KVM can easily establish new mapping for the 
+BAR GPA to the actual BAR HPA through the memslot. If there is no memslot for 
+the GPA, then the MMIO emulation on the KVM side should be involved every access.
+However, for the BARs because we have memslot, after the initial fault on that 
+region, KVM can map the faultin GPA to HPA in stage2 table. For the detailed
+handling see [[]].
 
-```cpp
-static inline u32 pci__bar_address(struct pci_device_header *pci_hdr, int bar_num)
-{
-        return __pci__bar_address(pci_hdr->bar[bar_num]);
-}
-
-static inline u32 __pci__bar_address(u32 bar)
-{
-        if (__pci__bar_is_io(bar))
-                return bar & PCI_BASE_ADDRESS_IO_MASK;
-        return bar & PCI_BASE_ADDRESS_MEM_MASK;
-}
-
-
-```

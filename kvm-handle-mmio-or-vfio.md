@@ -1,3 +1,56 @@
+## KVM handling MMIO 
+
+```cpp
+        hva = gfn_to_hva_memslot_prot(memslot, gfn, &writable);
+        if (kvm_is_error_hva(hva) || (write_fault && !writable)) {
+                if (is_iabt) {
+                        ret = -ENOEXEC;
+                        goto out;
+                }
+
+                if (kvm_vcpu_abt_iss1tw(vcpu)) {
+                        kvm_inject_dabt(vcpu, kvm_vcpu_get_hfar(vcpu));
+                        ret = 1;
+                        goto out_unlock;
+                }
+
+                /*
+                 * Check for a cache maintenance operation. Since we
+                 * ended-up here, we know it is outside of any memory
+                 * slot. But we can't find out if that is for a device,
+                 * or if the guest is just being stupid. The only thing
+                 * we know for sure is that this range cannot be cached.
+                 *
+                 * So let's assume that the guest is just being
+                 * cautious, and skip the instruction.
+                 */
+                if (kvm_is_error_hva(hva) && kvm_vcpu_dabt_is_cm(vcpu)) {
+                        kvm_incr_pc(vcpu);
+                        ret = 1;
+                        goto out_unlock;
+                }
+
+                /*
+                 * The IPA is reported as [MAX:12], so we need to
+                 * complement it with the bottom 12 bits from the
+                 * faulting VA. This is always 12 bits, irrespective
+                 * of the page size.
+                 */
+                //this is how to calculate fault ipa exactly (including lowest 12bits)
+                fault_ipa |= kvm_vcpu_get_hfar(vcpu) & ((1 << 12) - 1);
+                fault_ipa &= ~gpa_stolen_mask;
+                ret = io_mem_abort(vcpu, fault_ipa);
+                goto out_unlock;
+        }
+```
+
+static inline bool kvm_is_error_hva(unsigned long addr)
+{
+        return IS_ERR_VALUE(addr);
+}
+
+
+
 ```cpp
 **Input**
 fault_ipa: fault ipa of the guest (page granule)

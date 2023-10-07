@@ -2257,6 +2257,9 @@ in the stream table to access the secure memory.
 
 
 
+##
 
-
-## Appendix
+valid in the RMM context means that the s2tte is used as valid mapping.
+For example, if the ripas is changed from the ram to empty the valid
+mapping accessible as the lsb bits of the s2tte will be deleted by 
+the RMI call also. 

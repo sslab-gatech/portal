@@ -169,7 +169,6 @@ out_unlock:
         srcu_read_unlock(&vcpu->kvm->srcu, idx);
         return ret;
 }
-
 ```
 
 
