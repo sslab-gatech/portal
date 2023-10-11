@@ -957,9 +957,9 @@ As ar esult of SMC_RMM_REALM_CREATE we have root page for stage2 page table for
 realm. However, it doesn't mean that we have sufficient tables to map the host 
 page to the realm IPA. Note that the stage2 page table consists of multiple 
 levels and its leaf page table entries actually maps the HPA to IPA. Therefore,
-we have to understand how RMM generate the s2tte table entries. However, note 
+we have to understand how RMM generate the **s2tt table entries**. However, note 
 that this RMI interface is not designed for generating actual IPA to HPA mapping.
-We will cover another RMI interfaces later in [[]].
+We will cover another RMI interfaces (DATA_CREATE) later in [[]].
 
 ```cpp
 unsigned long smc_rtt_create(unsigned long rtt_addr, //pa of the target RTT (Realm Translation Table)
@@ -1062,13 +1062,15 @@ out:
 }
 ```
 
-Although host passes pre-generated RTT entry to be set, but the RMM should walk
-the internal stage 2 page table to locate the RTT entry that should be set 
+Although host can pass pre-generated RTT entry to be set, but the RMM should
+walk the internal stage 2 page table to locate the RTT entry that should be set 
 because the RMM doesn't trust the host. As the level of the RTT and the IPA is 
 passed, by walking the stage 2 page table, it can locate the RTT that should be 
 updated according to the passed RTT. To this end, it first walks the page table 
 from the root to the destination level. RTT of each level from the root to the 
-destination is stored in the g_tbls array in the above code. 
+destination is stored in the g_tbls array in the above code. Note that it walks 
+until it reaches (target level - 1) because we needs parent s2tte entry to make 
+it point to new RTT page. 
 
 ```cpp
 static struct granule *__find_lock_next_level(struct granule *g_tbl,
@@ -1142,7 +1144,7 @@ is array containing granules of RTT of root to destination level. This info is
 returned to the smc_rtt_create function through the rtt_walk structure. 
 
 
-### Generating the s2tte!
+### Set-up new s2tt table
 ```cpp
 unsigned long smc_rtt_create(unsigned long rtt_addr, //host provided address that can be used as rtt table!
                              unsigned long rd_addr,
@@ -1175,9 +1177,9 @@ unsigned long smc_rtt_create(unsigned long rtt_addr, //host provided address tha
 
 Because we currently have information of the granule mapped to the parent RTT
 that needs to be updated, it should first map the granule and read its content.
-The reason it needs mapping of the parent s2tte is that it should update parent
+The reason it needs mapping of the parent s2tt is that it should update parent
 RTT to point to host provided RTT. Moreover, the newly updated RTT page should 
-be initialize to be used as RTT. To this end, it maps host provided RTT page 
+be initialized to be used as RTT. To this end, it maps host provided RTT page 
 through its granule (g_tbl). It first initialize the new RTT page and update 
 parent RTT page accordingly. Let's see!
 
@@ -1295,9 +1297,10 @@ first generated during the REALM creation, the RIPAS of the root RTT entries
 should be zero, which means the UNASSIGNED. Before the other RMI call such as
 RMI_RTT_INIT_RIPAS is called, there is no way to change the HIPAS from 
 unassigned to assigned. The HIPAS can be changed through the RMI_DATA_CREATE 
-or RMI_DATA_DESTROY. 
+or RMI_DATA_DESTROY. The most important thing is this complicated else if 
+statements are used to initialize new RTT. 
 
-Let's see when the parent_s2tte is valid.
+Let's assume that the parent s2tte is valid.
 ```cpp
 unsigned long smc_rtt_create(unsigned long rtt_addr, //host provided address that can be used as rtt table!
                              unsigned long rd_addr,
@@ -1307,7 +1310,6 @@ unsigned long smc_rtt_create(unsigned long rtt_addr, //host provided address tha
 	......
         } else if (s2tte_is_valid(parent_s2tte, level - 1L)) {
                 unsigned long block_pa;
-                INFO("s2tte_is_valid\n");
 
                 /*
                  * We should observe parent valid s2tte only when
@@ -1335,6 +1337,40 @@ unsigned long smc_rtt_create(unsigned long rtt_addr, //host provided address tha
 ```
 
 ```cpp
+/*
+ * Returns true if @s2tte is a page or block s2tte, and NS=0.
+ */
+bool s2tte_is_valid(unsigned long s2tte, long level)
+{
+        return s2tte_check(s2tte, level, 0UL);
+}
+
+static bool s2tte_check(unsigned long s2tte, long level, unsigned long ns)
+{
+        unsigned long desc_type;
+
+        if ((s2tte & S2TTE_NS) != ns) {
+                return false;
+        }
+
+        desc_type = s2tte & DESC_TYPE_MASK;
+
+        /* Only pages at L3 and valid blocks at L2 allowed */
+        if (((level == RTT_PAGE_LEVEL) && (desc_type == S2TTE_L3_PAGE)) ||
+            ((level == RTT_MIN_BLOCK_LEVEL) && (desc_type == S2TTE_L012_BLOCK))) {
+                return true;
+        }
+
+        return false;
+}
+```
+
+Based on the checking code, we can understand that the valid or non-valid is 
+determined based on the NS field of the table descriptor (S2TTE_NS). If the NS 
+matches as expected, then it checks if the parent_s2tte is L3 page or L2 block,
+which means that the new page will be added is L3 page or L2 block. 
+
+```cpp
  * Populates @s2tt with HIPAS=VALID, RIPAS=@ripas s2ttes that refer to a
  * contiguous memory block starting at @pa, and mapped at level @level.
  *              
@@ -1354,16 +1390,56 @@ void s2tt_init_valid(unsigned long *s2tt, unsigned long pa, long level)
 }               
 ```
 
+If s2tte is valid descriptor, then it initialize the new s2tte as valid. As one
+s2tte can consist of multiple next level entries, it loops until the page is 
+fully initialized with the new pointers. 
 
 
 ```cpp
+#define S2TTE_BLOCK     (S2TTE_ATTRS | S2TTE_L012_BLOCK)
+#define S2TTE_PAGE      (S2TTE_ATTRS | S2TTE_L3_PAGE)
+/*
+ * Creates a page or block s2tte for a Protected IPA, with output address @pa.
+ */             
+unsigned long s2tte_create_valid(unsigned long pa, long level)
+{               
+        assert(level >= RTT_MIN_BLOCK_LEVEL);
+        assert(addr_is_level_aligned(pa, level));
+        if (level == RTT_PAGE_LEVEL) {
+                return (pa | S2TTE_PAGE); 
+        }       
+        return (pa | S2TTE_BLOCK);
+}       
+```
+
+
+### Map new RTT to the parent!
+```cpp
+unsigned long smc_rtt_create(unsigned long rtt_addr, //host provided address that can be used as rtt table!
+                             unsigned long rd_addr,
+                             unsigned long map_addr, //IPA address of guest that should be mapped in RTT
+                             unsigned long ulevel)
+{       
+	......
         ret = RMI_SUCCESS;
 
         granule_set_state(g_tbl, GRANULE_STATE_RTT);
 
         parent_s2tte = s2tte_create_table(rtt_addr, level - 1L);
         s2tte_write(&parent_s2tt[wi.index], parent_s2tte);
+	......
+}
 
+/*      
+ * Creates a table s2tte at level @level with output address @pa.
+ */
+unsigned long s2tte_create_table(unsigned long pa, long level)
+{        
+        assert(level < RTT_PAGE_LEVEL);
+        assert(GRANULE_ALIGNED(pa));
+        
+        return (pa | S2TTE_TABLE);
+}            
 ```
 
 After the update, it first updates the granule of the new RTT page to 
@@ -1371,17 +1447,6 @@ GRANULE_STATE_RTT because it will be used as RTT page! Also, it sets up flag
 on the rtt_addr which is the physical address of the RTT to indicate that this 
 page is used as s2tte table in what level, not entry. Finally it updates the 
 parent_s2tt so that the next level RTT connection can be established. 
-
-
-
-
-
-
-
-
-
-
-
 
 
 

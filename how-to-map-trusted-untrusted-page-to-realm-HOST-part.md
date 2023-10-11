@@ -423,11 +423,7 @@ err:
 }
 ```
 The most noticeable difference compared with generating untrusted ipa mapping is
-it requires the physical page that will be mapped should be delegated to the 
-realm before calling RMI to generate mapping to that physical page. The big 
-difference is made from whether the page is delegated to the realm or not, which
-makes the GPT configuration changes restricting access control for the page as
-a result. 
-
-Also it utilize different RMI SMC_RMM_DATA_CREATE_UNKNOWN instead of 
-SMC_RMM_RTT_MAP_UNPROTECTED to generate mapping in the RTT. 
+that it requires the physical page that will be mapped should be delegated to 
+the realm before calling RMI to generate mapping to that physical page. Also it 
+utilize RMI SMC_RMM_DATA_CREATE_UNKNOWN instead of SMC_RMM_RTT_MAP_UNPROTECTED 
+to generate mapping in the RTT. 

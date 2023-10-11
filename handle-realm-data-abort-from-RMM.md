@@ -100,7 +100,9 @@ end:
 }
 ```
 
-ipa_is_empty function checks if the faultin ipa is not mapped in the s2tt. 
+ipa_is_empty function checks if RIPAS of the faultin IPA is EMPTY. If it is 
+EMPTY, instead of rec_exit, it re-enters to realm after SEA injection to the 
+realm.
 
 
 ```cpp
@@ -144,10 +146,11 @@ For the untrusted IPA, there is no RIPAS, and the addr_in_rec_par checks the
 faultin ipa is in trusted IPA or not. In our case, because the faultin IPA is 
 within the untrusted IPA, it returns false. If not, it walks the s2tt and locate
 the last entry translating the faultin ipa to the host physical address and
-validate if the IPA is empty or not. Before returning from handle_exception_sync,
-it updates rec_exit to provide information of the fault to the host. Also note 
-that the exit_reason is set as RMI_EXIT_SYNC for data abort. Let's see how the 
-host handle the fault.
+validate if the IPA is empty or not. 
+
+Before returning from handle_exception_sync, it updates rec_exit to provide 
+information of the fault to the host. Also note that the exit_reason is set as 
+RMI_EXIT_SYNC for data abort. Let's see how the host handle the fault.
 
 
 ## Host side

@@ -680,12 +680,6 @@ unsigned long s2tte_create_valid_ns(unsigned long s2tte, long level)
 
 
 
-smc_rtt_init_ripas: when the HIPAS is unassigned, usually when the new page is inserted into the REALM while its creation, 
-the RIPAS can be initialized as RAM through this RMI call. Also, RIPAS can only be set for the last RTTE. Therefore,
-if the target page is not the leaf, then it returns the current level and make the host to generate RTT before changing 
-the RIPAS of the entry. Basically the kernel implementation invokes RTT_INIT_RIPAS and RTT_CREATE RMI calls multiple 
-times until the RIPAS can be successfully changed. 
-
 
 set_memory_encrypted is the RSI call invoked from the realm kernel. It sets the specific memory area from EMPTY RIPAS to 
 MEMORY RIPAS. 
