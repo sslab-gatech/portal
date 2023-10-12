@@ -499,7 +499,9 @@ out_unmap_rd:
 After generating the s2tte, just updating the parent s2tt establish the proper
 mapping!
 
-## Map NS-IPA
+
+
+## Map Untrusted IPA
 Non-secure pages are mapped through the stage 2 page table secured by the RMM.
 However, instead of building entire page entry mapped to the NS memory from the 
 scratch, **host passes the generated page to the RMM** and RMM validates the 

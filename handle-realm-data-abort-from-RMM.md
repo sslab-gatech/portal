@@ -100,10 +100,8 @@ end:
 }
 ```
 
-ipa_is_empty function checks if RIPAS of the faultin IPA is EMPTY. If it is 
-EMPTY, instead of rec_exit, it re-enters to realm after SEA injection to the 
-realm.
 
+### Check faultin IPA is EMPTY or Untrusted IPA
 
 ```cpp
 static bool ipa_is_empty(unsigned long ipa, struct rec *rec)
@@ -141,16 +139,41 @@ out_unmap_ll_table:
         return ret;
 }
 ```
+It checks two important conditions. First and foremost, it checks if the IPA is
+Trusted or Untrusted (addr_in_rec_par check). For example, if the fault happens
+due to accessing DMA memory at the first time before the S2TTE mapping is 
+established yet, it will return false. This is intuitive to return false because 
+there is no RIPAS for untrusted IPA.
 
-For the untrusted IPA, there is no RIPAS, and the addr_in_rec_par checks the 
-faultin ipa is in trusted IPA or not. In our case, because the faultin IPA is 
-within the untrusted IPA, it returns false. If not, it walks the s2tt and locate
-the last entry translating the faultin ipa to the host physical address and
-validate if the IPA is empty or not. 
+If faultin address is within the Trusted IPA, it walks the s2tt and locate the
+last entry in the RTT utilized to map the faultin IPA to HPA. After the walking,
+it validates if the RIPAS of the S2TTE is empty or not. If it turns out that 
+the S2TTE RIPAS is EMPTY, it enters to the realm after injection SEA fault to it
+instead of rec_exit. 
 
-Before returning from handle_exception_sync, it updates rec_exit to provide 
-information of the fault to the host. Also note that the exit_reason is set as 
-RMI_EXIT_SYNC for data abort. Let's see how the host handle the fault.
+```cpp
+static bool handle_data_abort(struct rec *rec, struct rmi_rec_exit *rec_exit,
+                              unsigned long esr)
+{
+	......
+        far = read_far_el2() & ~GRANULE_MASK;
+        esr &= ESR_EMULATED_ABORT_MASK;
+
+end:
+        rec_exit->esr = esr;
+        rec_exit->far = far;
+        rec_exit->hpfar = hpfar;
+        rec_exit->gprs[0] = write_val;
+
+        return false;
+}
+
+```
+
+After the RIPAS check, it updates rec_exit to provide information of the fault 
+to the host because host should invoke proper RMI to generate mapping in RTT. 
+Also note that the exit_reason was set as RMI_EXIT_SYNC for data abort in the 
+handle_realm_exit function. Let's see how the host handle the fault.
 
 
 ## Host side

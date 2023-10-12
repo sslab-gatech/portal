@@ -1259,31 +1259,41 @@ should be patched accordingly to make the realm access the untrusted host memory
 
 
 ## Mapping untrusted IPA to the page 
-How the fault raised in the realm due to accessing untrusted can be resolved? 
+How a fault raised in the realm due to accessing untrusted IPA can be resolved? 
 After change_page_range is invoked for the DMA range, the IPA originally used 
-for the DMA is moved to the upper half by changing stage 1 page table of the 
+for the DMA is **moved to the upper half** by changing stage 1 page table of the 
 realm. However, accessing this page from the realm through the virtual address
-should generate the fault, cause there is no s2tt mapping. That is what I 
+should generate the fault, because there is no s2tt mapping. That is what I 
 described about how the realm allocates untrusted IPA for DMA. Then how the host
 handles the fault generated due to accessing it? 
 
 ### Revisit host for handling fault-ipa
-When we try to remind of how the host handles the fault_ipa, first it checks if 
-there is any memslot translating the fault-ipa (IPA) to HVA. If not, it is 
-treated as MMIO and first handled by the kernel. If it cannot be handled by the 
-kernel itself, it exits to the user and ask handling the MMIO. However, if there
-is a memslot for the faultin IPA, then the KVM treats the fault-ipa as non-MMIO
-and tries to generate mapping from the faultin IPA to HPA because memslot can 
-be utilized to retrieve HPA from HVA mapped to the IPA.
+When the realm exits, and if its fault-ipa is within untrusted, there could be 
+two reasons of exit. 
 
-Then what happens after the trusted IPA is translated into untrusted IPA after 
-the RSI to reserve untrusted DMA space for realm? Note that the faultin ipa is 
-not exactly same as before because the MSB is set because the realm changes the 
-stage 1 page table. Yeah there is a potential chance that this changed IPA could 
-be treated as MMIO address if the entire address including the MSB is used to 
-locate the memslot for the IPA. Intuitively, we can assume that the IPA without
-the MSB would be used make the realm treat it as non-mmio address to generate 
-proper mapping :) But let's to be clear by checking the code!
+1. Realm access MMIO region
+2. Realm access particular DMA memory page for the first time 
+
+Therefore, the first job of the host is to figure out whether the fault happens
+due to MMIO or accesses that can be resolved by the host. Host can determine it 
+by checking **if there is a memslot translating the fault-ipa (IPA) to HVA**. 
+If there is no memslot associated with the fault-ipa, it should be handled as 
+MMIO. Host KVM tries to handle the MMIO exit by itself in the kernel space first,
+but if it fails, then it exits to the user and ask handling MMIO. See [[].
+However, if there is a memslot for the faultin IPA, it means that the fault-ipa 
+can be mapped to HPA through stage 2 page table. However, in the realm case, 
+because KVM cannot manipulate RTT directly, it should invoke RMIs to ask RMM to
+update RTT on behalf of KVM. Wait! How KVM can have memslot for faultin IPA?! 
+
+### Memslot used for Trusted IPA will be used to map Untrusted IPA
+Because KVM doesn't know which Untrusted IPA memory region will be used as DMA,
+it cannot prepare the memslot for Untrusted IPA beforehand. However, note that
+KVM must have the memslot for the Trusted IPA because it should be mapped to 
+HPA. You might guess the answer!
+
+Yeah, as there was a Trusted IPA which has identical address of the Untrusted
+IPA used for the DMA, except the MSB, KVM reuses the memslot assigned for the 
+previous Trusted IPA. Let's check the code.
 
 
 ```cpp
@@ -1365,8 +1375,6 @@ mapping from trusted IPA to HPA which will not be accessed by the realm.
 >Realm data access to a Protected IPA whose RIPAS is EMPTY causes a Synchronous
 >External Abort taken to the Realm.
 realm_destroy_undelegate_range)
-
-
 
 
 
