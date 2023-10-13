@@ -1474,7 +1474,7 @@ is calculated.
 ```
 Remember that ECAM region was mapped in the virtual address space before. The 
 total size of the ECAM region is calculated by #of bus (0x100) multiply by the 
-size of each ECAM region (0x100000). Also, each ECAM region dedicate for each 
+size of each ECAM region (0x100000). Also, each ECAM region dedicated to each 
 bus can be sub-divided into 4K size 256 config space. Because each bus can have 
 up to 256 slots, unique and equal amount of config space should be allocated per 
 device in the bus. As each bus has 0x100000 size ECAM space in total, if it is 

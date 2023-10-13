@@ -635,7 +635,8 @@ static unsigned long map_unmap_ns(unsigned long rd_addr,
 As shown in the code, RMI for mapping the NS memory doesn't require a physical
 page address because host_s2tte already provides the address and additional 
 attributes required to map IPA. When the target s2tte RIPAS is set as unassigned,
-it can create valid s2tte for untrusted mapping.
+it can create valid s2tte for untrusted mapping. Because there is no RIPAS for 
+untrusted IPA, regardless it is EMPTY or RAM, it adds same flags to S2TTE.
 
 ```cpp
 /*
@@ -656,35 +657,27 @@ unsigned long s2tte_create_valid_ns(unsigned long s2tte, long level)
         return (s2tte | S2TTE_BLOCK_NS);
 }
 
-/*
- * We set HCR_EL2.FWB So we set bit[4] to 1 and bits[3:2] to 2 and force
- * everyting to be Normal Write-Back
- */
-#define S2TTE_MEMATTR_FWB_NORMAL_WB     ((1UL << 4) | (2UL << 2))
-#define S2TTE_AF                        (1UL << 10)
-#define S2TTE_XN                        (2UL << 53)
-#define S2TTE_NS                        (1UL << 55)
-
-#define S2TTE_ATTRS     (S2TTE_MEMATTR_FWB_NORMAL_WB | S2TTE_AP_RW | \
-                        S2TTE_SH_IS | S2TTE_AF)
-
-#define S2TTE_TABLE     S2TTE_L012_TABLE
-#define S2TTE_BLOCK     (S2TTE_ATTRS | S2TTE_L012_BLOCK)
-#define S2TTE_PAGE      (S2TTE_ATTRS | S2TTE_L3_PAGE)
 #define S2TTE_BLOCK_NS  (S2TTE_NS | S2TTE_XN | S2TTE_AF | S2TTE_L012_BLOCK)
 #define S2TTE_PAGE_NS   (S2TTE_NS | S2TTE_XN | S2TTE_AF | S2TTE_L3_PAGE)
-#define S2TTE_INVALID   0
 
+#define S2TTE_XN                        (2UL << 53)
+#define S2TTE_NS                        (1UL << 55)
+#define S2TTE_AF                        (1UL << 10)
+#define S2TTE_L012_BLOCK           0x1UL
+#define S2TTE_L3_PAGE                      0x3UL
 ```
 
+Compared to previous data_create RMI for establishing Trusted IPA mapping, it 
+does not enforce particular access permission nor memory attributes for the page
+because the untrusted IPA pages are not assumed to be secure by the RMM and let 
+host to configure whatever option it needs. 
+
+Also, we can see that HIPAS and RIPAS mean nothing for valid NS page. RMM can 
+differentiate S2TTE mapping trusted and untrusted IPA through the NS bit. 
 
 
 
 
-
-
-set_memory_encrypted is the RSI call invoked from the realm kernel. It sets the specific memory area from EMPTY RIPAS to 
-MEMORY RIPAS. 
 
 
 

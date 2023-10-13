@@ -1522,11 +1522,12 @@ static int vfio_map_mem_bank(struct kvm *kvm, struct kvm_mem_bank *bank, void *d
 ```
 
 KVMTOOL iterates all KVM_MEM_TYPE_RAM and invokes ioctl to vfio_container. Note 
-that dma_map variable conveys memory information that needs to be mapped in the 
-IOMMU to the kernel driver. Note that the guest_phys_addr is used as the iova,
-and host_addr mapped to that GPA is used as vaddr. By passing these two values
-to the kernel, it can retrieve the physical address mapped to the vaddr and bind
-iova(GPA) to HPA through the IOMMU mapping. We will see!
+that dma_map variable passes memory information that needs to be mapped by the 
+IOMMU. Note that the guest_phys_addr, IPA of guest VM, is passed as the iova,
+and host_addr, HVA mapped to that GPA is passed as vaddr. When kernel receives 
+the IPA -> HVA addresses pair, it can retrieve the physical address mapped to 
+the vaddr and bind iova(GPA) to HPA in IOMMU mapping so that device can access 
+HPA through the IPA. We will see!
 
 ### kernel-side handling for VFIO_IOMMU_MAP_DMA
 The IOMMU should be controlled by the host kernel, and VFIO_IOMMU_MAP_DMA ioctl
@@ -1566,9 +1567,10 @@ static long vfio_fops_unl_ioctl(struct file *filep,
 }
 ```
 
-Since it has VFIO_IOMMU_MAP_DMA ioctl function, the ioctl of the driver 
-maintained by the container is invoked. 
-
+Above function is the ioctl handling function of the vfio container driver. When
+VFIO_IOMMU_MAP_DMA ioctl is requested, it will be considered as default case 
+because there is no exact matching case. Since container has registered iommu 
+driver, its ioctl handling function will be invoked.
 
 ```cpp
 static long vfio_iommu_type1_ioctl(void *iommu_data,
@@ -1613,16 +1615,14 @@ static int vfio_iommu_type1_map_dma(struct vfio_iommu *iommu,
 ```
 
 ### Main function to do DMA for guest vm mem
-As the kernel driver has capability to manipulate the IOMMU page table, now it 
-can generate mapping from the vfio to the HPA. We already have the vfio address
-passed from the kvmtool, which is the GPA region of the guest vm. Since we only
-have access for the HVA mapped to the GPA, it should retrieve the HPA mapped to
-the GPA. Since kernel has page table accesses, it can easily retrieve the HPA. 
-
-The function vfio_dma_do_map is responsible for pinning the physical pages of 
-the HVA used by kvmtool. It then invokes vfio_iommu_map to perform the mapping 
-of IOVA to HPA. This function subsequently calls iommu_map and, finally, the map
-function within the iommu_ops.
+IOMMU allows the device to access HPA through the IOVA. As VFIO allows the guest 
+to configure device to utilize address in GPA, IOMMU should have a valid mapping 
+translating GPA (iova) to HPA (hpa mapped to GPA) to allow device access guest 
+memory accesses. 
+ 
+Since we only provided information about GPA and its HVA, kernel should retrieve
+the HPA mapped to the GPA. By walking the page table, it can easily retrieve the 
+mapped HPA. 
 
 ```cpp
 static int vfio_dma_do_map(struct vfio_iommu *iommu,
@@ -1642,6 +1642,7 @@ static int vfio_dma_do_map(struct vfio_iommu *iommu,
 
         /* READ/WRITE from device perspective */
         if (map->flags & VFIO_DMA_MAP_FLAG_WRITE)
+
                 prot |= IOMMU_WRITE;
         if (map->flags & VFIO_DMA_MAP_FLAG_READ)
                 prot |= IOMMU_READ;
@@ -1758,29 +1759,14 @@ out_unlock:
 }
 ```
 
-\XXX{Give more details about vfio_dma_do_map later how it generates mmio mapping}
+The function vfio_dma_do_map is responsible for pinning the physical pages of 
+the HVA used by kvmtool. It then invokes vfio_iommu_map to perform the mapping 
+of IOVA to HPA. This function subsequently calls iommu_map and, finally, the map
+function within the iommu_ops. 
 
-```cpp
-static struct vfio_dma *vfio_find_dma(struct vfio_iommu *iommu,
-                                      dma_addr_t start, size_t size)
-{
-        struct rb_node *node = iommu->dma_list.rb_node;
+\XXX{vfio_pin_map_dma -> vfio_pin_pages_remote need to be analyzed} 
 
-        while (node) {
-                struct vfio_dma *dma = rb_entry(node, struct vfio_dma, node);
 
-                if (start + size <= dma->iova)
-                        node = node->rb_left;
-                else if (start >= dma->iova + dma->size)
-                        node = node->rb_right;
-                else
-                        return dma;
-        }
-                 
-        return NULL;
-}
-
-```
 
 
 
@@ -1791,6 +1777,7 @@ guest exits due to accessing the BAR region of the guest (emulated), it exits to
 the host, and host checks if there is a memslot that can translate the faultin 
 IPA. IF there is a memslot, then the KVM can map the faultin IPA to the HPA!
 The most important job of the vfio device is to generate this memslot mapping.
+
 To allow the guest VM to access the BAR regions, vfio-pci driver maps the BAR 
 region in HPA and generate HVA (through ioremap). Then it asks the KVM driver 
 to generate memslot for IPA (mapped for the guest BAR) to the generated HVA. 

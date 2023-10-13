@@ -371,7 +371,11 @@ bool handle_realm_exit(struct rec *rec, struct rmi_rec_exit *rec_exit, int excep
 ```
 
 It further invokes handle_exception_sync to check detailed reasons of exit from
-the Realm and tries to handle the exception if possible. 
+the Realm and tries to handle the exception if possible. Also, if it cannot 
+handle the exception itself and needs rec exit (when hamdle_exception_sync 
+returns false), last_run_info of the rec will store registers relevant to the 
+fault, so that the RMM will verifies the host behavior later. See [mmio_in_cca.md]
+
 
 ```cpp
 /*
@@ -1080,7 +1084,154 @@ static void realm_destroy_undelegate_range(struct realm *realm,
 }       
 ```
 
-Explain what is data_destory and granule undelegate.. 
+### Destroy data page (RMM)
+```cpp
+unsigned long smc_data_destroy(unsigned long rd_addr,
+                               unsigned long map_addr)
+{               
+        struct granule *g_data;
+        struct granule *g_rd;
+        struct granule *g_table_root;
+        struct rtt_walk wi;
+        unsigned long data_addr, s2tte, *s2tt;
+        struct rd *rd;
+        unsigned long ipa_bits;
+        unsigned long ret;
+        struct realm_s2_context s2_ctx;
+        bool valid;
+        int sl; 
+                        
+        g_rd = find_lock_granule(rd_addr, GRANULE_STATE_RD);
+        if (g_rd == NULL) {
+                return RMI_ERROR_INPUT;
+        }
+        
+        rd = granule_map(g_rd, SLOT_RD);
+
+        if (!validate_map_addr(map_addr, RTT_PAGE_LEVEL, rd)) {
+                buffer_unmap(rd);
+                granule_unlock(g_rd);
+                return RMI_ERROR_INPUT;
+        }
+        
+        g_table_root = rd->s2_ctx.g_rtt;
+        sl = realm_rtt_starting_level(rd);
+        ipa_bits = realm_ipa_bits(rd);
+        s2_ctx = rd->s2_ctx;
+        buffer_unmap(rd);
+        
+        granule_lock(g_table_root, GRANULE_STATE_RTT);
+        granule_unlock(g_rd);
+               
+        rtt_walk_lock_unlock(g_table_root, sl, ipa_bits,
+                                map_addr, RTT_PAGE_LEVEL, &wi);
+        if (wi.last_level != RTT_PAGE_LEVEL) {
+                ret = pack_return_code(RMI_ERROR_RTT, wi.last_level);
+                goto out_unlock_ll_table;
+        }
+```
+Since the data page assigned for the realm should be the leaf page, if the level
+does not match with the RTT_PAGE_LEVEL, it returns error.
+
+
+```cpp
+unsigned long smc_data_destroy(unsigned long rd_addr,
+                               unsigned long map_addr)
+{               
+	......
+        s2tt = granule_map(wi.g_llt, SLOT_RTT);
+        s2tte = s2tte_read(&s2tt[wi.index]);
+
+        valid = s2tte_is_valid(s2tte, RTT_PAGE_LEVEL);
+
+        /*
+         * Check if either HIPAS=ASSIGNED or map_addr is a
+         * valid Protected IPA.
+         */
+        if (!valid && !s2tte_is_assigned(s2tte, RTT_PAGE_LEVEL)) {
+                ret = pack_return_code(RMI_ERROR_RTT, RTT_PAGE_LEVEL);
+                goto out_unmap_ll_table;
+        }
+
+        data_addr = s2tte_pa(s2tte, RTT_PAGE_LEVEL);
+
+        /*
+         * We have already established either HIPAS=ASSIGNED or a valid mapping.
+         * If valid, transition HIPAS to DESTROYED and if HIPAS=ASSIGNED,
+         * transition to UNASSIGNED.
+         */
+        s2tte = valid ? s2tte_create_destroyed() :            //from data page
+                        s2tte_create_unassigned(RIPAS_EMPTY); //from assigned empty
+        
+``` 
+Note that the S2TTE can be destroyed by the host even though it is still valid 
+page and might be used by the realm. If it is not valid S2TTE, then at least 
+it should be ASSIGNED page. The second case might be right after the RIPAS of 
+the valid page is changed to EMPTY, which means it is not valid page but still
+assigned and empty. Remind that update_ripas generated ASSIGNED and EMPTY page
+when valid S2TTE is changed to EMPTY. 
+
+The important thing is based on whether it is valid or not but assigned, it 
+generates different S2TTE for destroted S2TTE.  
+
+```cpp
+unsigned long s2tte_create_destroyed(void)
+{       
+        return S2TTE_INVALID_DESTROYED;
+}     
+
+unsigned long s2tte_create_unassigned(enum ripas ripas)
+{       
+        return S2TTE_INVALID_HIPAS_UNASSIGNED | s2tte_create_ripas(ripas);
+}       
+```
+
+Note that this difference can convey critical status of the S2TTE. When host 
+invoked this RMI against the valid page, then it means host destroy page without
+permission of the realm. Therefore, it sets S2TTE_INVALID_DESTROYED. However,
+if it is not valid but empty page, this request might have been initiated from
+the realm and host just invoke the RMI. Therefore, instead of setting HIPAS as 
+DESTROYED, it sets the page as UNASSIGNED. 
+
+
+```cpp
+unsigned long smc_data_destroy(unsigned long rd_addr,
+                               unsigned long map_addr)
+{               
+	......
+        s2tte_write(&s2tt[wi.index], s2tte);
+        
+        if (valid) {
+                invalidate_page(&s2_ctx, map_addr);
+        }
+        
+        __granule_put(wi.g_llt);
+        
+        /*
+         * Lock the data granule and check expected state. Correct locking order
+         * is guaranteed because granule address is obtained from a locked
+         * granule by table walk. This lock needs to be acquired before a state
+         * transition to or from GRANULE_STATE_DATA for granule address can happen.
+         */
+        g_data = find_lock_granule(data_addr, GRANULE_STATE_DATA);
+        assert(g_data);
+        granule_memzero(g_data, SLOT_DELEGATED);
+        granule_unlock_transition(g_data, GRANULE_STATE_DELEGATED);
+        
+        ret = RMI_SUCCESS;
+
+out_unmap_ll_table:
+        buffer_unmap(s2tt);
+out_unlock_ll_table:
+        granule_unlock(wi.g_llt);
+        
+        return ret;
+}
+```
+Also, if the destroyed page was valid, then RMM should invalidate the block 
+before returning to the host. For the assigned and empty page, the page was 
+already flushed out, so it doesn't flush out the page once again. Also, because
+it was set as DATA page in a software granule, it should be changed to DELEGATED.
 
 ## Return to RMM
 After the handle_rme_exit returns (1) which means it can continue execution on
@@ -1368,6 +1519,7 @@ mapped in the stage 2 page table to allow the realm access untrusted IPA.
 Therefore, it needs entire IPA including the MSB is necessary. If the IPA is 
 passed to the user_mem_abort after masking out the MSB, then it will establish
 mapping from trusted IPA to HPA which will not be accessed by the realm. 
+
 
 
 ## Questions & Answers
