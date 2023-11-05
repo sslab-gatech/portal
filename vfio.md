@@ -1771,7 +1771,7 @@ function within the iommu_ops.
 
 
 ## Register VFIO BAR as KVM memory
-To generate the mapping from the GPA (IPA) to the BAR region (HPA) of the 
+To generate the mapping from the **GPA (IPA) to the BAR region (HPA)** of the 
 platform, the KVM should have mapping from the GPA to HVA. In details, when the 
 guest exits due to accessing the BAR region of the guest (emulated), it exits to
 the host, and host checks if there is a memslot that can translate the faultin 

@@ -1520,6 +1520,541 @@ Therefore, it needs entire IPA including the MSB is necessary. If the IPA is
 passed to the user_mem_abort after masking out the MSB, then it will establish
 mapping from trusted IPA to HPA which will not be accessed by the realm. 
 
+### MMIO handling in general (user_mem_abort)
+For the realm fault due to initial DMA access (accessing untrusted IPA), it will
+invoke user_mem_abort because there is a memslot previously used for mapping 
+trusted IPA. In that case, user_mem_abort, which handles MMIO accesses of the 
+guest will be invoked. 
+
+```cpp
+static int user_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa,
+                          struct kvm_memory_slot *memslot, unsigned long hva,
+                          unsigned long fault_status)
+{
+        int ret = 0;
+        bool write_fault, writable, force_pte = false;
+        bool exec_fault;
+        bool device = false;
+        unsigned long mmu_seq;
+        struct kvm *kvm = vcpu->kvm;
+        struct kvm_mmu_memory_cache *memcache = &vcpu->arch.mmu_page_cache;
+        struct vm_area_struct *vma;
+        short vma_shift;
+        gfn_t gfn;
+        kvm_pfn_t pfn;
+        bool logging_active = memslot_is_logging(memslot);
+        unsigned long fault_level = kvm_vcpu_trap_get_fault_level(vcpu);
+        unsigned long vma_pagesize, fault_granule;
+        enum kvm_pgtable_prot prot = KVM_PGTABLE_PROT_R;
+        struct kvm_pgtable *pgt;
+        gpa_t gpa_stolen_mask = kvm_gpa_stolen_bits(vcpu->kvm);
+
+        fault_granule = 1UL << ARM64_HW_PGTABLE_LEVEL_SHIFT(fault_level);
+        write_fault = kvm_is_write_fault(vcpu);
+
+        /* Realms cannot map read-only */
+        if (vcpu_is_rec(vcpu))
+                write_fault = true;
+
+        exec_fault = kvm_vcpu_trap_is_exec_fault(vcpu);
+        VM_BUG_ON(write_fault && exec_fault);
+
+        if (fault_status == FSC_PERM && !write_fault && !exec_fault) {
+                kvm_err("Unexpected L2 read permission error\n");
+                return -EFAULT;
+        }
+
+        /*
+         * Let's check if we will get back a huge page backed by hugetlbfs, or
+         * get block mapping for device MMIO region.
+         */
+        mmap_read_lock(current->mm);
+        vma = vma_lookup(current->mm, hva);
+        if (unlikely(!vma)) {
+                kvm_err("Failed to find VMA for hva 0x%lx\n", hva);
+                mmap_read_unlock(current->mm);
+                return -EFAULT;
+        }
+
+        /*
+         * logging_active is guaranteed to never be true for VM_PFNMAP
+         * memslots.
+         */
+        if (logging_active) {
+                force_pte = true;
+                vma_shift = PAGE_SHIFT;
+        } else if (kvm_is_realm(kvm)) {
+                // Force PTE level mappings for realms
+                force_pte = true;
+                vma_shift = PAGE_SHIFT;
+        } else {
+                vma_shift = get_vma_page_shift(vma, hva);
+        }
+
+        switch (vma_shift) {
+#ifndef __PAGETABLE_PMD_FOLDED
+        case PUD_SHIFT:
+                if (fault_supports_stage2_huge_mapping(memslot, hva, PUD_SIZE))
+                        break;
+                fallthrough;
+#endif
+        case CONT_PMD_SHIFT:
+                vma_shift = PMD_SHIFT;
+                fallthrough;
+        case PMD_SHIFT:
+                if (fault_supports_stage2_huge_mapping(memslot, hva, PMD_SIZE))
+                        break;
+                fallthrough;
+        case CONT_PTE_SHIFT:
+                vma_shift = PAGE_SHIFT;
+                force_pte = true;
+                fallthrough;
+        case PAGE_SHIFT:
+                break;
+        default:
+                WARN_ONCE(1, "Unknown vma_shift %d", vma_shift);
+        }
+
+        vma_pagesize = 1UL << vma_shift;
+        if (vma_pagesize == PMD_SIZE || vma_pagesize == PUD_SIZE)
+                fault_ipa &= ~(vma_pagesize - 1);
+
+        gfn = (fault_ipa & ~gpa_stolen_mask) >> PAGE_SHIFT;
+        mmap_read_unlock(current->mm);
+
+        /*
+         * Permission faults just need to update the existing leaf entry,
+         * and so normally don't require allocations from the memcache. The
+         * only exception to this is when dirty logging is enabled at runtime
+         * and a write fault needs to collapse a block entry into a table.
+         */
+        if (fault_status != FSC_PERM || (logging_active && write_fault)) {
+                ret = kvm_mmu_topup_memory_cache(memcache,
+                                                 kvm_mmu_cache_min_pages(kvm));
+                if (ret)
+                        return ret;
+        }
+
+        mmu_seq = vcpu->kvm->mmu_invalidate_seq;
+        /*
+         * Ensure the read of mmu_invalidate_seq happens before we call
+         * gfn_to_pfn_prot (which calls get_user_pages), so that we don't risk
+         * the page we just got a reference to gets unmapped before we have a
+         * chance to grab the mmu_lock, which ensure that if the page gets
+         * unmapped afterwards, the call to kvm_unmap_gfn will take it away
+         * from us again properly. This smp_rmb() interacts with the smp_wmb()
+         * in kvm_mmu_notifier_invalidate_<page|range_end>.
+         *
+         * Besides, __gfn_to_pfn_memslot() instead of gfn_to_pfn_prot() is
+         * used to avoid unnecessary overhead introduced to locate the memory
+         * slot because it's always fixed even @gfn is adjusted for huge pages.
+         */
+        smp_rmb();
+
+        pfn = __gfn_to_pfn_memslot(memslot, gfn, false, false, NULL,
+                                   write_fault, &writable, NULL);
+        if (pfn == KVM_PFN_ERR_HWPOISON) {
+                kvm_send_hwpoison_signal(hva, vma_shift);
+                return 0;
+        }
+        if (is_error_noslot_pfn(pfn))
+                return -EFAULT;
+
+        if (kvm_is_device_pfn(pfn)) {
+                /*
+                 * If the page was identified as device early by looking at
+                 * the VMA flags, vma_pagesize is already representing the
+                 * largest quantity we can map.  If instead it was mapped
+                 * via gfn_to_pfn_prot(), vma_pagesize is set to PAGE_SIZE
+                 * and must not be upgraded.
+                 *
+                 * In both cases, we don't let transparent_hugepage_adjust()
+                 * change things at the last minute.
+                 */
+                printk("device addr: %llx -> %llx\n", fault_ipa,
+                                (fault_ipa | (kvm_vcpu_get_hfar(vcpu) & ((1 << 12) - 1))) & ~gpa_stolen_mask);
+
+                device = true;
+        } else if (logging_active && !write_fault) {
+                /*
+                 * Only actually map the page as writable if this was a write
+                 * fault.
+                 */
+                writable = false;
+        }
+
+
+        if (exec_fault && device)
+                return -ENOEXEC;
+
+        read_lock(&kvm->mmu_lock);
+        pgt = vcpu->arch.hw_mmu->pgt;
+        if (mmu_invalidate_retry(kvm, mmu_seq))
+                goto out_unlock;
+
+        /*
+         * If we are not forced to use page mapping, check if we are
+         * backed by a THP and thus use block mapping if possible.
+         */
+        /* FIXME: We shouldn't need to disable this for realms */
+        if (vma_pagesize == PAGE_SIZE && !(force_pte || device || kvm_is_realm(kvm))) {
+                if (fault_status == FSC_PERM && fault_granule > PAGE_SIZE)
+                        vma_pagesize = fault_granule;
+                else
+                        vma_pagesize = transparent_hugepage_adjust(kvm, memslot,
+                                                                   hva, &pfn,
+                                                                   &fault_ipa);
+        }
+
+        if (fault_status != FSC_PERM && !device && kvm_has_mte(kvm)) {
+                /* Check the VMM hasn't introduced a new disallowed VMA */
+                if (kvm_vma_mte_allowed(vma)) {
+                        sanitise_mte_tags(kvm, pfn, vma_pagesize);
+                } else {
+                        ret = -EFAULT;
+                        goto out_unlock;
+                }
+        }
+
+        if (writable)
+                prot |= KVM_PGTABLE_PROT_W;
+
+        if (exec_fault)
+                prot |= KVM_PGTABLE_PROT_X;
+
+        if (device)
+                prot |= KVM_PGTABLE_PROT_DEVICE;
+        else if (cpus_have_const_cap(ARM64_HAS_CACHE_DIC))
+                prot |= KVM_PGTABLE_PROT_X;
+
+        /*
+         * Under the premise of getting a FSC_PERM fault, we just need to relax
+         * permissions only if vma_pagesize equals fault_granule. Otherwise,
+         * kvm_pgtable_stage2_map() should be called to change block size.
+         */
+        if (fault_status == FSC_PERM && vma_pagesize == fault_granule)
+                ret = kvm_pgtable_stage2_relax_perms(pgt, fault_ipa, prot);
+        else if (kvm_is_realm(kvm))
+                ret = realm_map_ipa(kvm, fault_ipa, hva, pfn, vma_pagesize,
+                                    prot, memcache);
+        else
+                ret = kvm_pgtable_stage2_map(pgt, fault_ipa, vma_pagesize,
+                                             __pfn_to_phys(pfn), prot,
+                                             memcache, KVM_PGTABLE_WALK_SHARED);
+
+        /* Mark the page dirty only if the fault is handled successfully */
+        if (writable && !ret) {
+                kvm_set_pfn_dirty(pfn);
+                mark_page_dirty_in_slot(kvm, memslot, gfn);
+        }
+
+out_unlock:
+        read_unlock(&kvm->mmu_lock);
+        kvm_set_pfn_accessed(pfn);
+        kvm_release_pfn_clean(pfn);
+        return ret != -EAGAIN ? ret : 0;
+}
+```
+
+**Input**
+- fault_ipa: fault ipa of the guest (page granule)
+- memslot: memslot translating fault_ipa to hva
+- hva: hva mapped to fault_ipa (already translated by the caller through memslot)
+
+When the guest runs as realm, it invokes realm_map_ipa. 
+
+```cpp
+static int realm_map_ipa(struct kvm *kvm,  ipa, unsigned long hva,phys_addr_e
+                         kvm_pfn_t pfn, unsigned long map_size,
+                         enum kvm_pgtable_prot prot,
+                         struct kvm_mmu_memory_cache *memcache)
+{
+        struct realm *realm = &kvm->arch.realm;
+        struct page *page = pfn_to_page(pfn);
+
+        if (WARN_ON(!(prot & KVM_PGTABLE_PROT_W)))
+                return -EFAULT;
+
+        if (!realm_is_addr_protected(realm, ipa))
+                return realm_map_non_secure(realm, ipa, page, map_size,
+                                            memcache);
+
+        return realm_map_protected(realm, hva, ipa, page, map_size, memcache);
+}
+```
+Because MMIO addresses are mapped in upper half of the realm IPA, which is 
+untrusted IPA region, it will invoke realm_map_non_secure function.
+
+```cpp
+int realm_map_non_secure(struct realm *realm,
+                         unsigned long ipa,
+                         struct page *page,
+                         unsigned long map_size,
+                         struct kvm_mmu_memory_cache *memcache)
+{
+        phys_addr_t rd = virt_to_phys(realm->rd);
+        int map_level;
+        int ret = 0;
+        unsigned long desc = page_to_phys(page) |
+                             PTE_S2_MEMATTR(MT_S2_FWB_NORMAL) |
+                             /* FIXME: Read+Write permissions for now */
+                             (3 << 6) |
+                             PTE_SHARED;
+
+        if (WARN_ON(!IS_ALIGNED(ipa, map_size)))
+                return -EINVAL;
+
+        switch (map_size) {
+        case PAGE_SIZE:
+                map_level = 3;
+                break;
+        case RME_L2_BLOCK_SIZE:
+                map_level = 2;
+                break;
+        default:
+                return -EINVAL;
+        }
+
+        ret = rmi_rtt_map_unprotected(rd, ipa, map_level, desc);
+
+        if (RMI_RETURN_STATUS(ret) == RMI_ERROR_RTT) {
+                /* Create missing RTTs and retry */
+                int level = RMI_RETURN_INDEX(ret);
+
+                ret = realm_create_rtt_levels(realm, ipa, level, map_level,
+                                              memcache);
+                if (WARN_ON(ret))
+                        return -ENXIO;
+
+                ret = rmi_rtt_map_unprotected(rd, ipa, map_level, desc);
+        }
+        if (WARN_ON(ret))
+                return -ENXIO;
+
+        return 0;
+}
+```
+
+Non-secure pages are mapped through the stage 2 page table secured by the RMM
+as similar to trusted IPA page mapping. However, instead of building stage 2 
+page table descriptor from the scratch by the RMM, **host passes the generated 
+page descriptor to the RMM** and RMM validates the provided descriptor and patch
+security critical field to provide some security guarantees. However, compared
+to what it has been done for S2TTE for trusted IPA, the guarantees are very 
+minimal and almost nothing. 
+
+
+### Map Untrusted IPA
+Let's see how RMM generate S2TTE for untrusted IPA based on **host provided**
+stage 2 page table descriptor. 
+
+```cpp
+unsigned long smc_rtt_map_unprotected(unsigned long rd_addr,
+                                      unsigned long map_addr,
+                                      unsigned long ulevel,
+                                      unsigned long s2tte)
+{
+        long level = (long)ulevel;
+
+        if (!host_ns_s2tte_is_valid(s2tte, level)) {
+                return RMI_ERROR_INPUT;
+        }
+
+        return map_unmap_ns(rd_addr, map_addr, level, s2tte, MAP_NS);
+}
+
+/*
+ * Validate the portion of NS S2TTE that is provided by the host.
+ */
+bool host_ns_s2tte_is_valid(unsigned long s2tte, long level)
+{
+        unsigned long mask = addr_level_mask(~0UL, level) |
+                             S2TTE_MEMATTR_MASK |
+                             S2TTE_AP_MASK |
+                             S2TTE_SH_MASK;
+
+        /*
+         * Test that all fields that are not controlled by the host are zero
+         * and that the output address is correctly aligned. Note that
+         * the host is permitted to map any physical address outside PAR.
+         */
+        if ((s2tte & ~mask) != 0UL) {
+                return false;
+        }
+
+        /*
+         * Only one value masked by S2TTE_MEMATTR_MASK is invalid/reserved.
+         */
+        if ((s2tte & S2TTE_MEMATTR_MASK) == S2TTE_MEMATTR_FWB_RESERVED) {
+                return false;
+        }
+
+        /*
+         * Only one value masked by S2TTE_SH_MASK is invalid/reserved.
+         */
+        if ((s2tte & S2TTE_SH_MASK) == S2TTE_SH_RESERVED) {
+                return false;
+        }
+
+        /*
+         * Note that all the values that are masked by S2TTE_AP_MASK are valid.
+         */
+        return true;
+}
+```
+
+Although RMM utilize the host provided descriptor to generate S2TTE, but it 
+should at least check some properties of the descriptor does not violate 
+specific security guarantees. If the flags of the descriptor are not set with 
+reserved values, then it invokes map_unmap_ns to map the s2tte page.
+
+```cpp
+/*
+ * We don't hold a reference on the NS granule when it is
+ * mapped into a realm. Instead we rely on the guarantees
+ * provided by the architecture to ensure that a NS access
+ * to a protected granule is prohibited even within the realm.
+ */
+static unsigned long map_unmap_ns(unsigned long rd_addr,
+                                  unsigned long map_addr, //IPA to be mapped
+                                  long level,
+                                  unsigned long host_s2tte,
+                                  enum map_unmap_ns_op op)
+        struct granule *g_rd;
+        struct rd *rd; 
+        struct granule *g_table_root;
+        unsigned long *s2tt, s2tte;
+        struct rtt_walk wi;
+        unsigned long ipa_bits;
+        unsigned long ret;
+        struct realm_s2_context s2_ctx;
+        int sl;
+        
+        g_rd = find_lock_granule(rd_addr, GRANULE_STATE_RD);
+        if (g_rd == NULL) {
+                return RMI_ERROR_INPUT;
+        }
+        
+        rd = granule_map(g_rd, SLOT_RD);
+        
+        if (!validate_rtt_map_cmds(map_addr, level, rd)) {
+                buffer_unmap(rd);
+                granule_unlock(g_rd);
+                return RMI_ERROR_INPUT;
+        }
+        
+        g_table_root = rd->s2_ctx.g_rtt;
+        sl = realm_rtt_starting_level(rd);
+        ipa_bits = realm_ipa_bits(rd);
+        
+        /*
+         * We don't have to check PAR boundaries for unmap_ns
+         * operation because we already test that the s2tte is Valid_NS
+         * and only outside-PAR IPAs can be translated by such s2tte.
+         *
+         * For "map_ns", however, the s2tte is verified to be Unassigned
+         * but both inside & outside PAR IPAs can be translated by such s2ttes.
+         */
+        if ((op == MAP_NS) && addr_in_par(rd, map_addr)) {
+                buffer_unmap(rd);
+                granule_unlock(g_rd);
+                return RMI_ERROR_INPUT;
+        }
+        
+        s2_ctx = rd->s2_ctx;
+        buffer_unmap(rd);
+        
+        granule_lock(g_table_root, GRANULE_STATE_RTT);
+        granule_unlock(g_rd);
+        
+        rtt_walk_lock_unlock(g_table_root, sl, ipa_bits,
+                                map_addr, level, &wi);
+        if (wi.last_level != level) {
+                ret = pack_return_code(RMI_ERROR_RTT, wi.last_level);
+                goto out_unlock_llt;
+        }
+
+        s2tt = granule_map(wi.g_llt, SLOT_RTT);
+        s2tte = s2tte_read(&s2tt[wi.index]);
+        if (op == MAP_NS) {
+                if (!s2tte_is_unassigned(s2tte)) {
+                        ret = pack_return_code(RMI_ERROR_RTT,
+                                                (unsigned int)level);
+                        goto out_unmap_table;
+                }
+
+                s2tte = s2tte_create_valid_ns(host_s2tte, level);
+                s2tte_write(&s2tt[wi.index], s2tte);
+                __granule_get(wi.g_llt);
+
+        } else if (op == UNMAP_NS) {
+                /*
+                 * The following check also verifies that map_addr is outside
+                 * PAR, as valid_NS s2tte may only cover outside PAR IPA range.
+                 */
+                if (!s2tte_is_valid_ns(s2tte, level)) {
+                        ret = pack_return_code(RMI_ERROR_RTT,
+                                                (unsigned int)level);
+                        goto out_unmap_table;
+                }
+
+                s2tte = s2tte_create_invalid_ns();
+                s2tte_write(&s2tt[wi.index], s2tte);
+                __granule_put(wi.g_llt);
+                if (level == RTT_PAGE_LEVEL) {
+                        invalidate_page(&s2_ctx, map_addr);
+                } else {
+                        invalidate_block(&s2_ctx, map_addr);
+                }
+        }
+```
+
+As shown in the code, RMI for mapping the NS memory doesn't require a physical
+page address because host_s2tte already provides the address and additional
+attributes required to map IPA. When the target s2tte RIPAS is set as unassigned,
+it can create valid s2tte for untrusted mapping. Because there is no RIPAS for
+untrusted IPA, regardless it is EMPTY or RAM, it adds same flags to S2TTE.
+
+```cpp
+/*
+ * Creates a page or block s2tte for an Unprotected IPA at level @level.
+ *
+ * The following S2 TTE fields are provided through @s2tte argument:
+ * - The physical address
+ * - MemAttr
+ * - S2AP
+ * - Shareability
+ */
+unsigned long s2tte_create_valid_ns(unsigned long s2tte, long level)
+{
+        assert(level >= RTT_MIN_BLOCK_LEVEL);
+        if (level == RTT_PAGE_LEVEL) {
+                return (s2tte | S2TTE_PAGE_NS);
+        }
+        return (s2tte | S2TTE_BLOCK_NS);
+}
+
+#define S2TTE_BLOCK_NS  (S2TTE_NS | S2TTE_XN | S2TTE_AF | S2TTE_L012_BLOCK)
+#define S2TTE_PAGE_NS   (S2TTE_NS | S2TTE_XN | S2TTE_AF | S2TTE_L3_PAGE)
+
+#define S2TTE_XN                        (2UL << 53)
+#define S2TTE_NS                        (1UL << 55)
+#define S2TTE_AF                        (1UL << 10)
+#define S2TTE_L012_BLOCK           0x1UL
+#define S2TTE_L3_PAGE                      0x3UL
+```
+
+Compared to previous data_create RMI for establishing Trusted IPA mapping, it
+does not enforce particular access permission nor memory attributes for the page
+because the untrusted IPA pages are not assumed to be secure by the RMM and let
+host to configure whatever option it needs. Also, we can see that HIPAS and 
+RIPAS mean nothing for valid NS page. RMM can differentiate S2TTE mapping 
+trusted and untrusted IPA through the NS bit.
+
+
+
+
+
 
 
 ## Questions & Answers
