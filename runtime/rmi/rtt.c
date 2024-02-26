@@ -144,7 +144,7 @@ unsigned long smc_rtt_create(unsigned long rtt_addr, //host provided address tha
 
 	parent_s2tt = granule_map(wi.g_llt, SLOT_RTT);
 	parent_s2tte = s2tte_read(&parent_s2tt[wi.index]);
-	s2tt = granule_map(g_tbl, SLOT_DELEGATED);
+	s2tt = granule_map(g_tbl, SLOT_DELEGATED); //new s2tt that needs to be added under parent_s2tt
 
 	if (s2tte_is_unassigned(parent_s2tte)) {
 		INFO("s2tte_is_unassigned\n");

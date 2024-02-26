@@ -41,7 +41,7 @@
  */
 #define S2TTE_MEMATTR_SHIFT		2
 #define S2TTE_MEMATTR_MASK		(0x7UL << S2TTE_MEMATTR_SHIFT)
-#define S2TTE_MEMATTR_FWB_NORMAL_WB	((1UL << 4) | (2UL << 2))
+#define S2TTE_MEMATTR_FWB_NORMAL_WB	((1UL << 4) | (2UL << 2)) 
 #define S2TTE_MEMATTR_FWB_RESERVED	((1UL << 4) | (0UL << 2))
 
 #define S2TTE_AP_SHIFT			6
