@@ -891,8 +891,10 @@ static unsigned long data_create(unsigned long data_addr,
 		goto out_unmap_ll_table;
 	}
 
+	/*
 	INFO("IPA:%lx LVL:%ld s2tt:%lx[%ld] -> s2tte:%lx",
 			map_addr, wi.last_level, granule_addr(wi.g_llt), wi.index, s2tte );
+	*/
 
 	ripas = s2tte_get_ripas(s2tte);
 
@@ -928,7 +930,7 @@ static unsigned long data_create(unsigned long data_addr,
 
 	s2tte_write(&s2tt[wi.index], s2tte);
 	s2tte = s2tte_read(&s2tt[wi.index]);
-	INFO(" -> s2tte:%lx\n", s2tte);
+	//INFO(" -> s2tte:%lx\n", s2tte);
 
 	__granule_get(wi.g_llt);
 
@@ -1183,11 +1185,11 @@ unsigned long smc_rtt_init_ripas(unsigned long rd_addr,
 
 	s2tte |= s2tte_create_ripas(RIPAS_RAM);
 
-	INFO("IPA:%lx LVL:%ld s2tt:%lx[%ld] -> s2tte:%lx ->",
+	//INFO("IPA:%lx LVL:%ld s2tt:%lx[%ld] -> s2tte:%lx ->",
 			map_addr, wi.last_level, granule_addr(wi.g_llt), wi.index, s2tte);
 	s2tte_write(&s2tt[wi.index], s2tte);
 	s2tte = s2tte_read(&s2tt[wi.index]);
-	INFO(" s2tte:%lx\n", s2tte);
+	//INFO(" s2tte:%lx\n", s2tte);
 
 	ripas_granule_measure(rd, map_addr, level);
 
@@ -1294,12 +1296,14 @@ unsigned long smc_rtt_set_ripas(unsigned long rd_addr,
 		goto out_unmap_llt;
 	}
 
+	/*
 	INFO("IPA:%lx LVL:%ld s2tt:%lx[%ld] -> s2tte:%lx ->",
 			map_addr, wi.last_level, granule_addr(wi.g_llt), wi.index, s2tte);
+	*/
 	s2tte_write(&s2tt[wi.index], s2tte);
 
 	s2tte = s2tte_read(&s2tt[wi.index]);
-	INFO(" s2tte:%lx\n", s2tte);
+	//INFO(" s2tte:%lx\n", s2tte);
 
 	if (valid && (ripas == RIPAS_EMPTY)) {
 		if (level == RTT_PAGE_LEVEL) {
