@@ -50,4 +50,9 @@ static inline void set_memory_range_portal(phys_addr_t start, phys_addr_t end)
 {
 	set_memory_range(start, end, RSI_RIPAS_PORTAL);
 }
+
+static inline void set_memory_range_portal_executable(phys_addr_t start, phys_addr_t end)
+{
+	set_memory_range(start, end, RSI_RIPAS_PORTAL_EXECUTABLE);
+}
 #endif
