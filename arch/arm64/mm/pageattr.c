@@ -223,28 +223,28 @@ static int __set_memory_encrypted(unsigned long addr,
 }
 
 static int __set_memory_portal(unsigned long addr,
-				  int numpages,
-				  bool executable)
-{
-	unsigned long set_prot = 0, clear_prot = 0;
-	phys_addr_t start, end;
-
-	if (!is_realm_world())
-		return 0;
-
-	WARN_ON(!__is_lm_address(addr));
-	start = __virt_to_phys(addr);
-	end = start + numpages * PAGE_SIZE;
-
-	set_prot =  PROT_NS_SHARED;
-	if (!executable) {
-		set_memory_range_portal(start, end);
-	} else {
-		set_memory_range_portal_executable(start,end);
-	}
-	return __change_memory_common(addr, PAGE_SIZE * numpages,
-				      __pgprot(set_prot),
-				      __pgprot(clear_prot));
+                                  int numpages,
+                                  bool executable)
+{       
+        unsigned long set_prot = 0, clear_prot = 0;
+        phys_addr_t start, end;
+        
+        if (!is_realm_world())
+                return 0;
+        
+        WARN_ON(!__is_lm_address(addr));
+        start = __virt_to_phys(addr);
+        end = start + numpages * PAGE_SIZE;
+        
+        set_prot =  PROT_NS_SHARED;
+        if (!executable) {
+                set_memory_range_portal(start, end);
+        } else {
+                set_memory_range_portal_executable(start,end);
+        }
+        return __change_memory_common(addr, PAGE_SIZE * numpages,
+                                      __pgprot(set_prot),
+                                      __pgprot(clear_prot));
 }
 
 int set_memory_encrypted(unsigned long addr, int numpages)
