@@ -156,6 +156,8 @@
 /* The RmmRipas enumeration representing realm IPA state */
 #define RMI_EMPTY   (0)
 #define RMI_RAM     (1)
+#define RMI_PORTAL_XN (2)
+#define RMI_PORTAL_X (3)
 
 /* no parameters */
 #define SMC_RMM_VERSION				SMC64_RMI_FID(U(0x0))

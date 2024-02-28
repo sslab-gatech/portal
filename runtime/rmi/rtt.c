@@ -1185,8 +1185,10 @@ unsigned long smc_rtt_init_ripas(unsigned long rd_addr,
 
 	s2tte |= s2tte_create_ripas(RIPAS_RAM);
 
-	//INFO("IPA:%lx LVL:%ld s2tt:%lx[%ld] -> s2tte:%lx ->",
+	/*
+	INFO("IPA:%lx LVL:%ld s2tt:%lx[%ld] -> s2tte:%lx ->",
 			map_addr, wi.last_level, granule_addr(wi.g_llt), wi.index, s2tte);
+	*/
 	s2tte_write(&s2tt[wi.index], s2tte);
 	s2tte = s2tte_read(&s2tt[wi.index]);
 	//INFO(" s2tte:%lx\n", s2tte);
