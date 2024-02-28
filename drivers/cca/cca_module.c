@@ -22,9 +22,8 @@ void __attribute__((aligned(4096))) test_func2(void)
 
 static int __init hello_init(void) {
     printk(KERN_INFO "Hello, world!\n\n\n\n\n\n\n");
-
     printk("function 1: %p \t function2: %p\n", test_func, test_func2);
-    set_memory_portal_executable(test_func, 1);
+    //set_memory_portal_executable(test_func, 1);
 
     return 0; // Non-zero return means that the module couldn't be loaded.
 }
