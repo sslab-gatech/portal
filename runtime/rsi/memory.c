@@ -19,7 +19,8 @@ bool handle_rsi_ipa_state_set(struct rec *rec, struct rmi_rec_exit *rec_exit)
 	enum ripas ripas = (enum ripas)rec->regs[3];
 	INFO("%s: %lx-%lx RIPAS:%d\n",__func__,start,end, ripas);
 
-	if (ripas > RIPAS_RAM) {
+	//changed to allow RIPAS for portal
+	if (ripas > RIPAS_END) {
 		return true;
 	}
 

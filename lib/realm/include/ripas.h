@@ -17,7 +17,8 @@ enum ripas {
 	RIPAS_EMPTY = RMI_EMPTY,	/* Unused IPA for Realm */
 	RIPAS_RAM = RMI_RAM,		/* IPA used for Code/Data by Realm */
 	RIPAS_PORTAL = RMI_PORTAL_XN,
-	RIPAS_PROTAL_X = RMI_PORTAL_X
+	RIPAS_PROTAL_X = RMI_PORTAL_X,
+	RIPAS_END,
 };
 
 #endif /* RIPAS_H */
