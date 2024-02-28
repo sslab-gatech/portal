@@ -1224,7 +1224,7 @@ unsigned long smc_rtt_set_ripas(unsigned long rd_addr,
 	bool valid;
 	int sl;
 
-	if (ripas > RIPAS_RAM) {
+	if (ripas > RIPAS_END) {
 		return RMI_ERROR_INPUT;
 	}
 
