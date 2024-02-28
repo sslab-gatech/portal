@@ -146,6 +146,7 @@ int set_memory_nx(unsigned long addr, int numpages)
 
 int set_memory_x(unsigned long addr, int numpages)
 {
+	printk("Before set_memory_x: %lx\n", addr);
 	return change_memory_common(addr, numpages,
 					__pgprot(PTE_MAYBE_GP),
 					__pgprot(PTE_PXN));
@@ -236,10 +237,14 @@ static int __set_memory_portal(unsigned long addr,
         start = __virt_to_phys(addr);
         end = start + numpages * PAGE_SIZE;
         
-        set_prot =  PROT_NS_SHARED;
         if (!executable) {
+		set_prot =  PROT_NS_SHARED;
                 set_memory_range_portal(start, end);
         } else {
+		//this should be set later to indicate it is untrusted IPA
+		//set_prot = PROT_NS_SHARED;
+		set_prot = __pgprot(PTE_MAYBE_GP);
+		clear_prot = __pgprot(PTE_PXN);
                 set_memory_range_portal_executable(start,end);
         }
         return __change_memory_common(addr, PAGE_SIZE * numpages,
