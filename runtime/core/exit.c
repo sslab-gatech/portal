@@ -111,7 +111,7 @@ static bool ipa_is_empty(unsigned long ipa, struct rec *rec)
 	assert(GRANULE_ALIGNED(ipa));
 
 	if (!addr_in_rec_par(rec, ipa)) {
-		INFO("address %lx is not in PAR!!!\n", ipa);
+		//INFO("address %lx is not in PAR!!!\n", ipa);
 		return false;
 	}
 	granule_lock(rec->realm_info.g_rtt, GRANULE_STATE_RTT);
@@ -278,7 +278,7 @@ static bool handle_data_abort(struct rec *rec, struct rmi_rec_exit *rec_exit,
 	 *
 	 * Insert the SEA and return to the Realm if the granule's RIPAS is EMPTY.
 	 */
-	INFO("%s: fault_ipa:%lx\n",  __func__, fipa);
+	//INFO("%s: fault_ipa:%lx\n",  __func__, fipa);
 	if (ipa_is_empty(fipa, rec)) {
 		inject_sync_idabort(ESR_EL2_ABORT_FSC_SEA);
 		return true;
@@ -302,7 +302,7 @@ end:
 	rec_exit->far = far;
 	rec_exit->hpfar = hpfar;
 	rec_exit->gprs[0] = write_val;
-	INFO("Exit to host to ask finish data abort for %lx\n", fipa);
+	//INFO("Exit to host to ask finish data abort for %lx\n", fipa);
 
 	return false;
 }
