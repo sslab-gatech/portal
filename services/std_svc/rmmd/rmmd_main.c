@@ -249,8 +249,12 @@ static uint64_t	rmmd_smc_forward(uint32_t src_sec_state,
 
 
 #if ENABLE_PORTAL
-	/* Need to switch NGPT->PGPT before entering realm  */
-	switch_ngpt_to_pgpt();
+	/* Need to switch NGPT<->PGPT before forwarding smc */
+	if (src_sec_state == NON_SECURE) { //rmi
+		switch_ngpt_to_pgpt();
+	} else if (src_sec_state == REALM) { //rmi done
+		switch_pgpt_to_ngpt();
+	}
 #endif 
 
 	/* Restore outgoing security state */
