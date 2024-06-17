@@ -61,6 +61,7 @@ static const gpt_p_val_e gpt_p_lookup[] = {PGS_4KB_P, PGS_64KB_P, PGS_16KB_P};
  */
 typedef struct {
 	uintptr_t plat_gpt_l0_base;
+	uintptr_t plat_gpt_l0_pgpt_base;
 	gpccr_pps_e pps;
 	gpt_t_val_e t;
 	gpccr_pgs_e pgs;
@@ -164,12 +165,18 @@ static bool gpt_does_previous_pas_exist_here(unsigned int l0_idx,
  *   required when successful.
  */
 static int gpt_validate_pas_mappings(pas_region_t *pas_regions,
-				     unsigned int pas_region_cnt)
+				     unsigned int pas_region_cnt, bool pgpt)
 {
 	unsigned int idx;
 	unsigned int l1_cnt = 0U;
 	unsigned int pas_l1_cnt;
-	uint64_t *l0_desc = (uint64_t *)gpt_config.plat_gpt_l0_base;
+	uint64_t *l0_desc;
+       
+	if (!pgpt) {
+		l0_desc = (uint64_t *)gpt_config.plat_gpt_l0_base;
+	} else {
+		l0_desc = (uint64_t *)gpt_config.plat_gpt_l0_pgpt_base;
+	}
 
 	assert(pas_regions != NULL);
 	assert(pas_region_cnt != 0U);
@@ -411,7 +418,7 @@ static int gpt_validate_l1_params(uintptr_t l1_mem_base, size_t l1_mem_size,
  *   *pas		Pointer to the structure defining the PAS region to
  *			initialize.
  */
-static void gpt_generate_l0_blk_desc(pas_region_t *pas)
+static void gpt_generate_l0_blk_desc(pas_region_t *pas, bool pgpt)
 {
 	uint64_t gpt_desc;
 	unsigned int end_idx;
@@ -426,7 +433,8 @@ static void gpt_generate_l0_blk_desc(pas_region_t *pas)
 	 * gpt_validate_pas_mappings so no need to check the same things again.
 	 */
 
-	l0_gpt_arr = (uint64_t *)gpt_config.plat_gpt_l0_base;
+	l0_gpt_arr = (uint64_t *)(pgpt ? gpt_config.plat_gpt_l0_pgpt_base: 
+			gpt_config.plat_gpt_l0_base) ;
 
 	/* Create the GPT Block descriptor for this PAS region */
 	gpt_desc = GPT_L0_BLK_DESC(GPT_PAS_ATTR_GPI(pas->attrs));
@@ -543,12 +551,16 @@ static uint64_t *gpt_get_new_l1_tbl(void)
 		       (GPT_L1_TABLE_SIZE(gpt_config.p) *
 		       gpt_next_l1_tbl_idx));
 
+	INFO("gpt_l1_tbl: %lx  gpt_next_l1_tbl_idx: %d\n",
+		(uint64_t)(gpt_l1_tbl), gpt_next_l1_tbl_idx);
+
 	/* Increment L1 counter. */
 	gpt_next_l1_tbl_idx++;
 
 	/* Initialize all GPIs to GPT_GPI_ANY */
 	for (unsigned int i = 0U; i < GPT_L1_ENTRY_COUNT(gpt_config.p); i++) {
 		l1[i] = GPT_BUILD_L1_DESC(GPT_GPI_ANY);
+		//INFO("Initializing L1 table[%d]\n", i);
 	}
 
 	return l1;
@@ -562,7 +574,7 @@ static uint64_t *gpt_get_new_l1_tbl(void)
  * Parameters
  *   *pas		Pointer to the structure defining the PAS region.
  */
-static void gpt_generate_l0_tbl_desc(pas_region_t *pas)
+static void gpt_generate_l0_tbl_desc(pas_region_t *pas, bool pgpt)
 {
 	uintptr_t end_pa;
 	uintptr_t cur_pa;
@@ -580,7 +592,8 @@ static void gpt_generate_l0_tbl_desc(pas_region_t *pas)
 	 */
 
 	end_pa = pas->base_pa + pas->size;
-	l0_gpt_base = (uint64_t *)gpt_config.plat_gpt_l0_base;
+	l0_gpt_base = (uint64_t *)(pgpt ? gpt_config.plat_gpt_l0_pgpt_base: 
+			gpt_config.plat_gpt_l0_base) ;
 
 	/* We start working from the granule at base PA */
 	cur_pa = pas->base_pa;
@@ -597,9 +610,12 @@ static void gpt_generate_l0_tbl_desc(pas_region_t *pas)
 		if (GPT_L0_TYPE(l0_gpt_base[l0_idx]) == GPT_L0_TYPE_TBL_DESC) {
 			/* Get the L1 array from the L0 entry. */
 			l1_gpt_arr = GPT_L0_TBLD_ADDR(l0_gpt_base[l0_idx]);
+			INFO("TBL_DESC\n");
 		} else {
 			/* Get a new L1 table from the L1 memory space. */
+			INFO("GPT_NEW_L1_TBL\n");
 			l1_gpt_arr = gpt_get_new_l1_tbl();
+			INFO("GPT_NEW_L1_TBL\n");
 
 			/* Fill out the L0 descriptor and flush it. */
 			l0_gpt_base[l0_idx] = GPT_L0_TBL_DESC(l1_gpt_arr);
@@ -692,6 +708,12 @@ int gpt_enable(void)
 		ERROR("[GPT] Tables have not been initialized!\n");
 		return -EPERM;
 	}
+#if ENABLE_PORTAL
+	if (gpt_config.plat_gpt_l0_pgpt_base == 0U) {
+		ERROR("[PGPT] Tables have not been initialized!\n");
+		return -EPERM;
+	}
+#endif 
 
 	/* Write the base address of the L0 tables into GPTBR */
 	write_gptbr_el3(((gpt_config.plat_gpt_l0_base >> GPTBR_BADDR_VAL_SHIFT)
@@ -763,7 +785,7 @@ void gpt_disable(void)
  *   Negative Linux error code in the event of a failure, 0 for success.
  */
 int gpt_init_l0_tables(gpccr_pps_e pps, uintptr_t l0_mem_base,
-		       size_t l0_mem_size)
+		       size_t l0_mem_size, bool pgpt)
 {
 	int ret;
 	uint64_t gpt_desc;
@@ -790,7 +812,11 @@ int gpt_init_l0_tables(gpccr_pps_e pps, uintptr_t l0_mem_base,
 			   (size_t)GPT_L0_TABLE_SIZE(gpt_config.t));
 
 	/* Stash the L0 base address once initial setup is complete. */
-	gpt_config.plat_gpt_l0_base = l0_mem_base;
+	if (pgpt) {
+		gpt_config.plat_gpt_l0_pgpt_base = l0_mem_base;
+	} else {
+		gpt_config.plat_gpt_l0_base = l0_mem_base;
+	}
 
 	return 0;
 }
@@ -818,35 +844,39 @@ int gpt_init_l0_tables(gpccr_pps_e pps, uintptr_t l0_mem_base,
  */
 int gpt_init_pas_l1_tables(gpccr_pgs_e pgs, uintptr_t l1_mem_base,
 			   size_t l1_mem_size, pas_region_t *pas_regions,
-			   unsigned int pas_count)
+			   unsigned int pas_count, bool pgpt)
 {
 	int ret;
 	int l1_gpt_cnt;
+	char *gpt = (pgpt) ? "PGPT" : "NGPT";
+	uintptr_t gpt_l0_base = (pgpt) ? gpt_config.plat_gpt_l0_pgpt_base :
+	       	gpt_config.plat_gpt_l0_base;
 
 	/* Ensure that MMU and Data caches are enabled. */
 	assert((read_sctlr_el3() & SCTLR_C_BIT) != 0U);
 
 	/* PGS is needed for gpt_validate_pas_mappings so check it now. */
 	if (pgs > GPT_PGS_MAX) {
-		ERROR("[GPT] Invalid PGS: 0x%x\n", pgs);
+		ERROR("[%s] Invalid PGS: 0x%x\n",gpt, pgs);
 		return -EINVAL;
 	}
-	gpt_config.pgs = pgs;
-	gpt_config.p = gpt_p_lookup[pgs];
-
+	if (!pgpt) {
+		gpt_config.pgs = pgs;
+		gpt_config.p = gpt_p_lookup[pgs];
+	}
 	/* Make sure L0 tables have been initialized. */
-	if (gpt_config.plat_gpt_l0_base == 0U) {
-		ERROR("[GPT] L0 tables must be initialized first!\n");
+	if (gpt_l0_base == 0U) {
+		ERROR("[%s] L0 tables must be initialized first!\n", gpt);
 		return -EPERM;
 	}
 
 	/* Check if L1 GPTs are required and how many. */
-	l1_gpt_cnt = gpt_validate_pas_mappings(pas_regions, pas_count);
+	l1_gpt_cnt = gpt_validate_pas_mappings(pas_regions, pas_count, pgpt);
 	if (l1_gpt_cnt < 0) {
 		return l1_gpt_cnt;
 	}
 
-	VERBOSE("[GPT] %u L1 GPTs requested.\n", l1_gpt_cnt);
+	VERBOSE("[%s] %u L1 GPTs requested.\n", gpt, l1_gpt_cnt);
 
 	/* If L1 tables are needed then validate the L1 parameters. */
 	if (l1_gpt_cnt > 0) {
@@ -861,16 +891,16 @@ int gpt_init_pas_l1_tables(gpccr_pgs_e pgs, uintptr_t l1_mem_base,
 		gpt_next_l1_tbl_idx = 0U;
 	}
 
-	INFO("[GPT] Boot Configuration\n");
+	INFO("[%s] Boot Configuration\n", gpt);
 	INFO("  PPS/T:     0x%x/%u\n", gpt_config.pps, gpt_config.t);
 	INFO("  PGS/P:     0x%x/%u\n", gpt_config.pgs, gpt_config.p);
 	INFO("  L0GPTSZ/S: 0x%x/%u\n", GPT_L0GPTSZ, GPT_S_VAL);
 	INFO("  PAS count: 0x%x\n", pas_count);
-	INFO("  L0 base:   0x%lx\n", gpt_config.plat_gpt_l0_base);
+	INFO("  L0 base:   0x%lx\n", gpt_l0_base);
 
 	/* Generate the tables in memory. */
 	for (unsigned int idx = 0U; idx < pas_count; idx++) {
-		INFO("[GPT] PAS[%u]: base 0x%lx, size 0x%lx, GPI 0x%x, type 0x%x\n",
+		INFO("[%s] PAS[%u]: base 0x%lx, size 0x%lx, GPI 0x%x, type 0x%x\n", gpt,
 		     idx, pas_regions[idx].base_pa, pas_regions[idx].size,
 		     GPT_PAS_ATTR_GPI(pas_regions[idx].attrs),
 		     GPT_PAS_ATTR_MAP_TYPE(pas_regions[idx].attrs));
@@ -878,10 +908,12 @@ int gpt_init_pas_l1_tables(gpccr_pgs_e pgs, uintptr_t l1_mem_base,
 		/* Check if a block or table descriptor is required */
 		if (GPT_PAS_ATTR_MAP_TYPE(pas_regions[idx].attrs) ==
 		    GPT_PAS_ATTR_MAP_TYPE_BLOCK) {
-			gpt_generate_l0_blk_desc(&pas_regions[idx]);
+			INFO("l0_blk_desc\n");
+			gpt_generate_l0_blk_desc(&pas_regions[idx], pgpt);
 
 		} else {
-			gpt_generate_l0_tbl_desc(&pas_regions[idx]);
+			INFO("l0_tbl_desc\n");
+			gpt_generate_l0_tbl_desc(&pas_regions[idx], pgpt);
 		}
 	}
 

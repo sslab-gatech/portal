@@ -149,7 +149,7 @@ static void arm_bl2_plat_gpt_setup(void)
 
 	/* Initialize entire protected space to GPT_GPI_ANY. */
 	if (gpt_init_l0_tables(GPCCR_PPS_64GB, ARM_L0_GPT_ADDR_BASE,
-		ARM_L0_GPT_SIZE) < 0) {
+		ARM_L0_GPT_SIZE, false) < 0) {
 		ERROR("gpt_init_l0_tables() failed!\n");
 		panic();
 	}
@@ -160,29 +160,34 @@ static void arm_bl2_plat_gpt_setup(void)
 				   ARM_L1_GPT_SIZE,
 				   pas_regions,
 				   (unsigned int)(sizeof(pas_regions) /
-				   sizeof(pas_region_t))) < 0) {
+				   sizeof(pas_region_t)),
+				   false
+				   ) < 0) {
 		ERROR("gpt_init_pas_l1_tables() failed!\n");
 		panic();
 	}
+
 #if ENABLE_PORTAL
-	/* Generate L0 & L1 table for P-GPT  */
+	//PGPT INITIALIZATION
 	if (gpt_init_l0_tables(GPCCR_PPS_64GB, ARM_L0_PGPT_ADDR_BASE,
-		ARM_L0_GPT_SIZE) < 0) {
-		ERROR("gpt_init_l0_tables() failed!\n");
+		ARM_L0_PGPT_SIZE, true) < 0) {
+		ERROR("gpt_init_l0_tables() for PGPT failed!\n");
 		panic();
 	}
 
+	/* Carve out defined PAS ranges. */
 	if (gpt_init_pas_l1_tables(GPCCR_PGS_4K,
 				   ARM_L1_PGPT_ADDR_BASE,
 				   ARM_L1_PGPT_SIZE,
 				   pas_regions,
 				   (unsigned int)(sizeof(pas_regions) /
-				   sizeof(pas_region_t))) < 0) {
-		ERROR("gpt_init_pas_l1_tables() failed!\n");
+				   sizeof(pas_region_t)),
+				   true
+				   ) < 0) {
+		ERROR("gpt_init_pas_l1_tables() for PGPT failed!\n");
 		panic();
 	}
 #endif 
-
 	INFO("Enabling Granule Protection Checks\n");
 	if (gpt_enable() < 0) {
 		ERROR("gpt_enable() failed!\n");

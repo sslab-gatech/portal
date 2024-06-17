@@ -1191,7 +1191,8 @@ $(eval $(call assert_numerics,\
         ENABLE_FEAT_TCR2 \
         ENABLE_FEAT_VHE \
         ENABLE_MPAM_FOR_LOWER_ELS \
-        ENABLE_RME \
+	ENABLE_RME \
+        ENABLE_PORTAL \
         ENABLE_SPE_FOR_NS \
         ENABLE_SYS_REG_TRACE_FOR_NS \
         ENABLE_SME_FOR_NS \
@@ -1248,6 +1249,7 @@ $(eval $(call add_defines,\
         ENABLE_PMF \
         ENABLE_PSCI_STAT \
         ENABLE_RME \
+        ENABLE_PORTAL \
         ENABLE_RUNTIME_INSTRUMENTATION \
         ENABLE_SME_FOR_NS \
         ENABLE_SME_FOR_SWD \

@@ -114,6 +114,9 @@ ENABLE_PSCI_STAT		:= 0
 # Flag to enable Realm Management Extension (FEAT_RME)
 ENABLE_RME			:= 0
 
+# Flag to enable PORTAL
+ENABLE_PORTAL			:= 0
+
 # Flag to enable runtime instrumentation using PMF
 ENABLE_RUNTIME_INSTRUMENTATION	:= 0
 

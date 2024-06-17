@@ -186,11 +186,11 @@ void bl31_main(void)
 #endif
 
 #if ENABLE_PORTAL
-	// block memory regions based on filter 
-
+#if 0	// \TODO{do not block smmu temporary until other implementation fished}
 	// block SMMU
 	if( !gpt_set_portal(SMMU_BASE, SMMU_REG_SIZE) )
 		WARN("Building portal for smmu failed\n");
+#endif 
 #endif 
 	/*
 	 * We are ready to enter the next EL. Prepare entry into the image

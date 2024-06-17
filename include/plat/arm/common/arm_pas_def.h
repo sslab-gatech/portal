@@ -87,7 +87,7 @@
 //Generate GPT mapping for the IO region..
 #define ARM_PAS_SMMU			GPT_MAP_REGION_GRANULE(SMMU_BASE,      \
 						    	       SMMU_REG_SIZE,  \
-						       	       GPT_GPI_ROOT)
+						       	       GPT_GPI_ANY) //TODO{Need to be patched AS GPT_GPI_ROOT}
 
 #define	ARM_PAS_KERNEL			GPT_MAP_REGION_GRANULE(ARM_PAS_2_BASE, \
 							       ARM_PAS_2_SIZE, \
@@ -114,8 +114,10 @@
 							       GPT_GPI_ROOT)
 
 #define	ARM_PAS_GPTS			GPT_MAP_REGION_GRANULE(ARM_L1_GPT_ADDR_BASE, \
-							       ARM_L1_GPT_SIZE, \
+							       ARM_L1_GPT_SIZE + \
+							       ARM_L1_PGPT_SIZE, \
 							       GPT_GPI_ROOT)
+
 
 /* GPT Configuration options */
 #define PLATFORM_L0GPTSZ		GPCCR_L0GPTSZ_30BITS

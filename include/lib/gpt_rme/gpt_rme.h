@@ -206,7 +206,8 @@ typedef enum {
  */
 int gpt_init_l0_tables(gpccr_pps_e pps,
 		       uintptr_t l0_mem_base,
-		       size_t l0_mem_size);
+		       size_t l0_mem_size,
+		       bool pgpt);
 
 /*
  * Public API that carves out PAS regions from the L0 tables and builds any L1
@@ -228,7 +229,8 @@ int gpt_init_pas_l1_tables(gpccr_pgs_e pgs,
 			   uintptr_t l1_mem_base,
 			   size_t l1_mem_size,
 			   pas_region_t *pas_regions,
-			   unsigned int pas_count);
+			   unsigned int pas_count,
+			   bool pgpt);
 
 /*
  * Public API to initialize the runtime gpt_config structure based on the values
@@ -277,5 +279,6 @@ void gpt_disable(void);
 int gpt_delegate_pas(uint64_t base, size_t size, unsigned int src_sec_state);
 int gpt_undelegate_pas(uint64_t base, size_t size, unsigned int src_sec_state);
 int gpt_set_portal (uint64_t base, size_t size);
+void switch_ngpt_to_pgpt();
 
 #endif /* GPT_RME_H */

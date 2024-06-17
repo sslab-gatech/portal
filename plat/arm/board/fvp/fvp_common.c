@@ -123,6 +123,10 @@ defined(SPD_spmd))
 #if ENABLE_RME
 	ARM_MAP_RMM_DRAM,
 	ARM_MAP_GPT_L1_DRAM,
+#if ENABLE_PORTAL
+	ARM_MAP_PGPT_L1_DRAM,
+
+#endif 
 #endif /* ENABLE_RME */
 #ifdef SPD_tspd
 	ARM_MAP_TSP_SEC_MEM,
