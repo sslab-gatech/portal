@@ -1334,3 +1334,9 @@ int gpt_set_portal (uint64_t base, size_t size)
 	}
 	return 1;
 }
+
+void switch_ngpt_to_pgpt()
+{
+	//implement switching for ngpt->pgpt
+}
+

@@ -247,6 +247,12 @@ static uint64_t	rmmd_smc_forward(uint32_t src_sec_state,
 	cm_el1_sysregs_context_save(src_sec_state);
 	cm_el2_sysregs_context_save(src_sec_state);
 
+
+#if ENABLE_PORTAL
+	/* Need to switch NGPT->PGPT before entering realm  */
+	switch_ngpt_to_pgpt();
+#endif 
+
 	/* Restore outgoing security state */
 	cm_el1_sysregs_context_restore(dst_sec_state);
 	cm_el2_sysregs_context_restore(dst_sec_state);

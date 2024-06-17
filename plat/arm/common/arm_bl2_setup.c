@@ -137,7 +137,7 @@ static void arm_bl2_plat_gpt_setup(void)
 	 */
 	pas_region_t pas_regions[] = {
 #if ENABLE_PORTAL
-		ARM_PAS_SMMU, // Set-up GPT for smmu mmio mapped regions !
+		ARM_PAS_SMMU, // Set-up GPT for smmu mmio mapped regions 
 #endif 
 		ARM_PAS_KERNEL,
 		ARM_PAS_SECURE,
@@ -164,6 +164,24 @@ static void arm_bl2_plat_gpt_setup(void)
 		ERROR("gpt_init_pas_l1_tables() failed!\n");
 		panic();
 	}
+#if ENABLE_PORTAL
+	/* Generate L0 & L1 table for P-GPT  */
+	if (gpt_init_l0_tables(GPCCR_PPS_64GB, ARM_L0_PGPT_ADDR_BASE,
+		ARM_L0_GPT_SIZE) < 0) {
+		ERROR("gpt_init_l0_tables() failed!\n");
+		panic();
+	}
+
+	if (gpt_init_pas_l1_tables(GPCCR_PGS_4K,
+				   ARM_L1_PGPT_ADDR_BASE,
+				   ARM_L1_PGPT_SIZE,
+				   pas_regions,
+				   (unsigned int)(sizeof(pas_regions) /
+				   sizeof(pas_region_t))) < 0) {
+		ERROR("gpt_init_pas_l1_tables() failed!\n");
+		panic();
+	}
+#endif 
 
 	INFO("Enabling Granule Protection Checks\n");
 	if (gpt_enable() < 0) {
