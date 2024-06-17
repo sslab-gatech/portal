@@ -551,9 +551,6 @@ static uint64_t *gpt_get_new_l1_tbl(void)
 		       (GPT_L1_TABLE_SIZE(gpt_config.p) *
 		       gpt_next_l1_tbl_idx));
 
-	INFO("gpt_l1_tbl: %lx  gpt_next_l1_tbl_idx: %d\n",
-		(uint64_t)(gpt_l1_tbl), gpt_next_l1_tbl_idx);
-
 	/* Increment L1 counter. */
 	gpt_next_l1_tbl_idx++;
 
@@ -610,12 +607,9 @@ static void gpt_generate_l0_tbl_desc(pas_region_t *pas, bool pgpt)
 		if (GPT_L0_TYPE(l0_gpt_base[l0_idx]) == GPT_L0_TYPE_TBL_DESC) {
 			/* Get the L1 array from the L0 entry. */
 			l1_gpt_arr = GPT_L0_TBLD_ADDR(l0_gpt_base[l0_idx]);
-			INFO("TBL_DESC\n");
 		} else {
 			/* Get a new L1 table from the L1 memory space. */
-			INFO("GPT_NEW_L1_TBL\n");
 			l1_gpt_arr = gpt_get_new_l1_tbl();
-			INFO("GPT_NEW_L1_TBL\n");
 
 			/* Fill out the L0 descriptor and flush it. */
 			l0_gpt_base[l0_idx] = GPT_L0_TBL_DESC(l1_gpt_arr);
@@ -908,11 +902,9 @@ int gpt_init_pas_l1_tables(gpccr_pgs_e pgs, uintptr_t l1_mem_base,
 		/* Check if a block or table descriptor is required */
 		if (GPT_PAS_ATTR_MAP_TYPE(pas_regions[idx].attrs) ==
 		    GPT_PAS_ATTR_MAP_TYPE_BLOCK) {
-			INFO("l0_blk_desc\n");
 			gpt_generate_l0_blk_desc(&pas_regions[idx], pgpt);
 
 		} else {
-			INFO("l0_tbl_desc\n");
 			gpt_generate_l0_tbl_desc(&pas_regions[idx], pgpt);
 		}
 	}
