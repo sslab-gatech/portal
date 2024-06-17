@@ -968,6 +968,11 @@ int gpt_runtime_init(void)
 	gpt_config.plat_gpt_l0_base = ((reg >> GPTBR_BADDR_SHIFT) &
 				      GPTBR_BADDR_MASK) <<
 				      GPTBR_BADDR_VAL_SHIFT;
+#if ENABLE_PORTAL
+	//\XXX{dirty hack: pgpt follows gpt}
+	gpt_config.plat_gpt_l0_pgpt_base = gpt_config.plat_gpt_l0_base +
+						ARM_L0_GPT_SIZE;
+#endif 
 
 	/* Read GPCCR to get PGS and PPS values. */
 	reg = read_gpccr_el3();
@@ -1009,11 +1014,11 @@ static inline void write_gpt(uint64_t *gpt_l1_desc, uint64_t *gpt_l1_addr,
  * Helper to retrieve the gpt_l1_* information from the base address
  * returned in gpi_info
  */
-static int get_gpi_params(uint64_t base, gpi_info_t *gpi_info)
+static int get_gpi_params(uint64_t base, gpi_info_t *gpi_info,
+		uint64_t *gpt_l0_base)
 {
-	uint64_t gpt_l0_desc, *gpt_l0_base;
+	uint64_t gpt_l0_desc;
 
-	gpt_l0_base = (uint64_t *)gpt_config.plat_gpt_l0_base;
 	gpt_l0_desc = gpt_l0_base[GPT_L0_IDX(base)];
 	if (GPT_L0_TYPE(gpt_l0_desc) != GPT_L0_TYPE_TBL_DESC) {
 		VERBOSE("[GPT] Granule is not covered by a table descriptor!\n");
@@ -1052,12 +1057,16 @@ static int get_gpi_params(uint64_t base, gpi_info_t *gpi_info)
 int gpt_delegate_pas(uint64_t base, size_t size, unsigned int src_sec_state)
 {
 	gpi_info_t gpi_info;
+	gpi_info_t pgpt_gpi_info;
 	uint64_t nse;
 	int res;
 	unsigned int target_pas;
 
 	/* Ensure that the tables have been set up before taking requests. */
 	assert(gpt_config.plat_gpt_l0_base != 0UL);
+#if ENABLE_PORTAL
+	assert(gpt_config.plat_gpt_l0_pgpt_base!= 0UL);
+#endif 
 
 	/* Ensure that caches are enabled. */
 	assert((read_sctlr_el3() & SCTLR_C_BIT) != 0UL);
@@ -1101,11 +1110,21 @@ int gpt_delegate_pas(uint64_t base, size_t size, unsigned int src_sec_state)
 	 * given time.
 	 */
 	spin_lock(&gpt_lock);
-	res = get_gpi_params(base, &gpi_info);
+	res = get_gpi_params(base, &gpi_info, 
+			(uint64_t *)gpt_config.plat_gpt_l0_base);
 	if (res != 0) {
 		spin_unlock(&gpt_lock);
 		return res;
 	}
+
+#if ENABLE_PORTAL
+	res = get_gpi_params(base, &pgpt_gpi_info, 
+			(uint64_t *)gpt_config.plat_gpt_l0_pgpt_base);
+	if (res != 0) {
+		spin_unlock(&gpt_lock);
+		return res;
+	}
+#endif 
 
 	/* Check that the current address is in NS state */
 	if (gpi_info.gpi != GPT_GPI_NS) {
@@ -1115,6 +1134,16 @@ int gpt_delegate_pas(uint64_t base, size_t size, unsigned int src_sec_state)
 		spin_unlock(&gpt_lock);
 		return -EPERM;
 	}
+
+#if ENABLE_PORTAL
+	if (pgpt_gpi_info.gpi != GPT_GPI_NS) {
+		VERBOSE("[GPT] Only Granule in NS state can be delegated.\n");
+		VERBOSE("      Caller: %u, Current GPI: %u\n", src_sec_state,
+			pgpt_gpi_info.gpi);
+		spin_unlock(&gpt_lock);
+		return -EPERM;
+	}
+#endif 
 
 	if (src_sec_state == SMC_FROM_SECURE) {
 		nse = (uint64_t)GPT_NSE_SECURE << GPT_NSE_SHIFT;
@@ -1132,6 +1161,10 @@ int gpt_delegate_pas(uint64_t base, size_t size, unsigned int src_sec_state)
 
 	write_gpt(&gpi_info.gpt_l1_desc, gpi_info.gpt_l1_addr,
 		  gpi_info.gpi_shift, gpi_info.idx, target_pas);
+#if ENABLE_PORTAL
+	write_gpt(&pgpt_gpi_info.gpt_l1_desc, pgpt_gpi_info.gpt_l1_addr,
+		  pgpt_gpi_info.gpi_shift, pgpt_gpi_info.idx, target_pas);
+#endif 
 	dsboshst();
 
 	gpt_tlbi_by_pa_ll(base, GPT_PGS_ACTUAL_SIZE(gpt_config.p));
@@ -1174,12 +1207,16 @@ int gpt_delegate_pas(uint64_t base, size_t size, unsigned int src_sec_state)
  */
 int gpt_undelegate_pas(uint64_t base, size_t size, unsigned int src_sec_state)
 {
-	gpi_info_t gpi_info;
+	gpi_info_t gpi_info, pgpt_gpi_info;
 	uint64_t nse;
 	int res;
 
 	/* Ensure that the tables have been set up before taking requests. */
 	assert(gpt_config.plat_gpt_l0_base != 0UL);
+#if ENABLE_PORTAL
+	assert(gpt_config.plat_gpt_l0_pgpt_base!= 0UL);
+#endif 
+
 
 	/* Ensure that MMU and caches are enabled. */
 	assert((read_sctlr_el3() & SCTLR_C_BIT) != 0UL);
@@ -1219,11 +1256,21 @@ int gpt_undelegate_pas(uint64_t base, size_t size, unsigned int src_sec_state)
 	 */
 	spin_lock(&gpt_lock);
 
-	res = get_gpi_params(base, &gpi_info);
+	res = get_gpi_params(base, &gpi_info,
+			(uint64_t *)gpt_config.plat_gpt_l0_base);
 	if (res != 0) {
 		spin_unlock(&gpt_lock);
 		return res;
 	}
+
+#if ENABLE_PORTAL
+	res = get_gpi_params(base, &pgpt_gpi_info,
+		       	(uint64_t *)gpt_config.plat_gpt_l0_pgpt_base);
+	if (res != 0) {
+		spin_unlock(&gpt_lock);
+		return res;
+	}
+#endif 
 
 	/* Check that the current address is in the delegated state */
 	if ((src_sec_state == SMC_FROM_REALM  &&
@@ -1245,6 +1292,10 @@ int gpt_undelegate_pas(uint64_t base, size_t size, unsigned int src_sec_state)
 	 */
 	write_gpt(&gpi_info.gpt_l1_desc, gpi_info.gpt_l1_addr,
 		  gpi_info.gpi_shift, gpi_info.idx, GPT_GPI_NO_ACCESS);
+#if ENABLE_PORTAL
+	write_gpt(&pgpt_gpi_info.gpt_l1_desc, pgpt_gpi_info.gpt_l1_addr,
+		  pgpt_gpi_info.gpi_shift, pgpt_gpi_info.idx, GPT_GPI_NO_ACCESS);
+#endif 
 	dsboshst();
 
 	gpt_tlbi_by_pa_ll(base, GPT_PGS_ACTUAL_SIZE(gpt_config.p));
@@ -1294,6 +1345,8 @@ int gpt_undelegate_pas(uint64_t base, size_t size, unsigned int src_sec_state)
 
 int gpt_set_portal (uint64_t base, size_t size)
 {
+	return 1;
+#if 0
 	gpi_info_t gpi_info;
 	uint64_t nse;
 	int res;
@@ -1364,7 +1417,7 @@ int gpt_set_portal (uint64_t base, size_t size)
 		INFO("[GPT] Granule 0x%" PRIx64 ", GPI 0x%x->0x%x\n",
 			target_base, gpi_info.gpi, target_pas);
 	}
-	return 1;
+#endif 
 }
 
 void switch_ngpt_to_pgpt()
