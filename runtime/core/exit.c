@@ -574,8 +574,7 @@ static bool handle_realm_rsi(struct rec *rec, struct rmi_rec_exit *rec_exit)
 		break; 
 	}
 	case SMC_RSI_SET_PORTAL: {
-		handle_rsi_set_portal();
-		INFO("SMC_RSI_SET_PORTAL:%ld\n", (rec->regs[1]));
+		handle_rsi_set_portal(rec);
 		break;
 	 }
 	default:
