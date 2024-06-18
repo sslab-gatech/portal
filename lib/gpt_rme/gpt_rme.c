@@ -1335,22 +1335,25 @@ int gpt_undelegate_pas(uint64_t base, size_t size, unsigned int src_sec_state)
 }
 
 
-int gpt_set_portal (uint64_t base, size_t size)
+int gpt_set_portal (uint64_t base, size_t size, 
+		unsigned int src_sec_state)
 {
-	return 1;
-#if 0
 	gpi_info_t gpi_info;
+	gpi_info_t pgpt_gpi_info;
 	uint64_t nse;
 	int res;
 	unsigned int target_pas;
-	unsigned int pageIdx = 0;
-	uint64_t target_base = 0;
 
-	/* Ensure that the tables have been set up before taking requests. */
-	assert(gpt_config.plat_gpt_l0_base != 0UL);
+	/* Portal request can only come from REALM or SECURE */
+	#if 1
+	assert(src_sec_state == SMC_FROM_REALM ||
+	       src_sec_state == SMC_FROM_SECURE);
+	#endif 
 
-	/* Ensure that caches are enabled. */
-	assert((read_sctlr_el3() & SCTLR_C_BIT) != 0UL);
+	/* See if this is a single or a range of granule transition. */
+	if (size != GPT_PGS_ACTUAL_SIZE(gpt_config.p)) {
+		return -EINVAL;
+	}
 
 	/* Check that base and size are valid */
 	if ((ULONG_MAX - base) < size) {
@@ -1360,56 +1363,101 @@ int gpt_set_portal (uint64_t base, size_t size)
 		return -EINVAL;
 	}
 
-	for ( pageIdx = 0; pageIdx < size / PAGE_SIZE_4KB; pageIdx ++) {
-		target_base = base + (PAGE_SIZE_4KB * pageIdx); 
-		//target_pas = GPT_GPI_REALM;
-		target_pas = GPT_GPI_ROOT;
+	/* Make sure base and size are valid. */
+	if (((base & (GPT_PGS_ACTUAL_SIZE(gpt_config.p) - 1)) != 0UL) ||
+	    ((size & (GPT_PGS_ACTUAL_SIZE(gpt_config.p) - 1)) != 0UL) ||
+	    (size == 0UL) ||
+	    ((base + size) >= GPT_PPS_ACTUAL_SIZE(gpt_config.t))) {
+		VERBOSE("[GPT] Invalid granule transition address range!\n");
+		VERBOSE("      Base=0x%" PRIx64 "\n", base);
+		VERBOSE("      Size=0x%lx\n", size);
+		return -EINVAL;
+	}
 
-		/*
-		 * Access to L1 tables is controlled by a global lock to ensure
-		 * that no more than one CPU is allowed to make changes at any
-		 * given time.
-		 */
-		spin_lock(&gpt_lock);
-		res = get_gpi_params(target_base, &gpi_info);
-		if (res != 0) {
-			spin_unlock(&gpt_lock);
-			return res;
-		}
 
-		//nse = (uint64_t)GPT_NSE_REALM << GPT_NSE_SHIFT;
-		nse = (uint64_t)GPT_NSE_ROOT << GPT_NSE_SHIFT;
-
-		/*
-		 * In order to maintain mutual distrust between Realm and Secure
-		 * states, remove any data speculatively fetched into the target
-		 * physical address space. Issue DC CIPAPA over address range
-		 */
-		flush_dcache_to_popa_range(nse | target_base,
-					   GPT_PGS_ACTUAL_SIZE(gpt_config.p));
-
-		write_gpt(&gpi_info.gpt_l1_desc, gpi_info.gpt_l1_addr,
-			  gpi_info.gpi_shift, gpi_info.idx, target_pas);
-		dsboshst();
-
-		gpt_tlbi_by_pa_ll(target_base, GPT_PGS_ACTUAL_SIZE(gpt_config.p));
-		dsbosh();
-
-		nse = (uint64_t)GPT_NSE_NS << GPT_NSE_SHIFT;
-
-		flush_dcache_to_popa_range(nse | target_base,
-					   GPT_PGS_ACTUAL_SIZE(gpt_config.p));
-
-		/* Unlock access to the L1 tables. */
+	/*
+	 * Access to L1 tables is controlled by a global lock to ensure
+	 * that no more than one CPU is allowed to make changes at any
+	 * given time.
+	 */
+	spin_lock(&gpt_lock);
+	//ngpt
+	res = get_gpi_params(base, &gpi_info, 
+			(uint64_t *)gpt_config.plat_gpt_l0_base);
+	if (res != 0) {
 		spin_unlock(&gpt_lock);
-		/*
-		 * The isb() will be done as part of context
-		 * synchronization when returning to lower EL
-		 */
-		INFO("[GPT] Granule 0x%" PRIx64 ", GPI 0x%x->0x%x\n",
-			target_base, gpi_info.gpi, target_pas);
+		return res;
+	}
+
+	//pgpt
+	res = get_gpi_params(base, &pgpt_gpi_info, 
+			(uint64_t *)gpt_config.plat_gpt_l0_pgpt_base);
+	if (res != 0) {
+		spin_unlock(&gpt_lock);
+		return res;
+	}
+
+//FIXME{current GPI should be validated, but temporarily ignoring}
+#if 0
+	if (gpi_info.gpi != GPT_GPI_NS) {
+		VERBOSE("[GPT] Only Granule in NS state can be delegated.\n");
+		VERBOSE("      Caller: %u, Current GPI: %u\n", src_sec_state,
+			gpi_info.gpi);
+		spin_unlock(&gpt_lock);
+		return -EPERM;
+	}
+
+	if (pgpt_gpi_info.gpi != GPT_GPI_NS) {
+		VERBOSE("[GPT] Only Granule in NS state can be delegated.\n");
+		VERBOSE("      Caller: %u, Current GPI: %u\n", src_sec_state,
+			pgpt_gpi_info.gpi);
+		spin_unlock(&gpt_lock);
+		return -EPERM;
 	}
 #endif 
+
+	if (src_sec_state == SMC_FROM_SECURE) {
+		nse = (uint64_t)GPT_NSE_SECURE << GPT_NSE_SHIFT;
+	} else {
+		nse = (uint64_t)GPT_NSE_REALM << GPT_NSE_SHIFT;
+	}
+
+	/*
+	 * In order to maintain mutual distrust between Realm and Secure
+	 * states, remove any data speculatively fetched into the target
+	 * physical address space. Issue DC CIPAPA over address range
+	 */
+	flush_dcache_to_popa_range(nse | base,
+				   GPT_PGS_ACTUAL_SIZE(gpt_config.p));
+
+	//ngpt
+	write_gpt(&gpi_info.gpt_l1_desc, gpi_info.gpt_l1_addr,
+		  gpi_info.gpi_shift, gpi_info.idx, GPT_GPI_REALM);
+	//pgpt
+	write_gpt(&pgpt_gpi_info.gpt_l1_desc, pgpt_gpi_info.gpt_l1_addr,
+		  pgpt_gpi_info.gpi_shift, pgpt_gpi_info.idx, GPT_GPI_NS);
+
+	dsboshst();
+
+	gpt_tlbi_by_pa_ll(base, GPT_PGS_ACTUAL_SIZE(gpt_config.p));
+	dsbosh();
+
+	nse = (uint64_t)GPT_NSE_NS << GPT_NSE_SHIFT;
+
+	flush_dcache_to_popa_range(nse | base,
+				   GPT_PGS_ACTUAL_SIZE(gpt_config.p));
+
+	/* Unlock access to the L1 tables. */
+	spin_unlock(&gpt_lock);
+
+	/*
+	 * The isb() will be done as part of context
+	 * synchronization when returning to lower EL
+	 */
+	VERBOSE("[GPT] Granule 0x%" PRIx64 ", GPI 0x%x->0x%x\n",
+		base, gpi_info.gpi, target_pas);
+
+	return 0;
 }
 
 void switch_ngpt_to_pgpt()

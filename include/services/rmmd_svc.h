@@ -128,6 +128,9 @@
 					/* 0x1B3 */
 #define RMM_ATTEST_GET_PLAT_TOKEN	SMC64_RMMD_EL3_FID(U(3))
 
+//set portal region SMC
+#define RMM_SET_PORTAL			SMC64_RMMD_EL3_FID(U(4))
+
 /* ECC Curve types for attest key generation */
 #define ATTEST_KEY_CURVE_ECC_SECP384R1		0
 

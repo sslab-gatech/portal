@@ -278,7 +278,7 @@ void gpt_disable(void);
  */
 int gpt_delegate_pas(uint64_t base, size_t size, unsigned int src_sec_state);
 int gpt_undelegate_pas(uint64_t base, size_t size, unsigned int src_sec_state);
-int gpt_set_portal (uint64_t base, size_t size);
+int gpt_set_portal (uint64_t base, size_t size, unsigned int src_sec_state);
 void switch_ngpt_to_pgpt();
 void switch_pgpt_to_ngpt();
 
