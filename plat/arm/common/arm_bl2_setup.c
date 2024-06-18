@@ -169,14 +169,6 @@ static void arm_bl2_plat_gpt_setup(void)
 
 #if ENABLE_PORTAL
 	//PGPT INITIALIZATION
-	INFO("ARM_BL_RAM_BASE: %lx\n", ARM_BL_RAM_BASE);
-	INFO("ARM_FW_CONFIGS_LIMIT: %lx\n", ARM_FW_CONFIGS_LIMIT);
-
-	INFO("BL31_BASE:%lx\n", BL31_BASE);
-	INFO("ARM_BL_RAM_BASE:%lx\n", ARM_BL_RAM_BASE);
-	INFO("ARM_BL_RAM_SIZE:%lx\n", ARM_BL_RAM_SIZE);
-	INFO("PLAT_ARM_MAX_BL31_SIZE:%lx\n", PLAT_ARM_MAX_BL31_SIZE);
-	INFO("ARM_L0_PGPT_SIZE:%lx\n", ARM_L0_PGPT_SIZE);
 	if (gpt_init_l0_tables(GPCCR_PPS_64GB, ARM_L0_PGPT_ADDR_BASE,
 		ARM_L0_PGPT_SIZE, true) < 0) {
 		ERROR("gpt_init_l0_tables() for PGPT failed!\n");
