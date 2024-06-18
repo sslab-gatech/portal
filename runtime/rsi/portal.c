@@ -19,3 +19,17 @@ unsigned long handle_rsi_set_portal(struct rec *rec)
 
 	return smc_ret;
 }
+
+
+unsigned long handle_rsi_device_manage(struct rec *rec)
+{
+
+	return 0;
+
+}
+
+unsigned long handle_rsi_attach_device(struct rec *rec)
+{
+
+	return 0;
+}
