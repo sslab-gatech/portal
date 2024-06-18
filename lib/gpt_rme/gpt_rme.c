@@ -1415,9 +1415,13 @@ int gpt_set_portal (uint64_t base, size_t size)
 void switch_ngpt_to_pgpt()
 {
 	//implement switching for ngpt->pgpt
-	INFO("%s: Switching ngpt -> pgpt \n", __func__);
+	INFO("%s: Switching ngpt(%lx) -> pgpt(%lx) \n", __func__,
+			(uint64_t)gpt_config.plat_gpt_l0_base, 
+			(uint64_t)gpt_config.plat_gpt_l0_pgpt_base);
+#if 1
 	write_gptbr_el3(((gpt_config.plat_gpt_l0_pgpt_base >> GPTBR_BADDR_VAL_SHIFT)
 			>> GPTBR_BADDR_SHIFT) & GPTBR_BADDR_MASK);
+#endif 
 
 	/* Invalidate any stale TLB entries and any cached register fields */
 	tlbipaallos();
@@ -1428,10 +1432,14 @@ void switch_ngpt_to_pgpt()
 void switch_pgpt_to_ngpt()
 {
 	//implement switching for pgpt->ngpt
-	INFO("%s: Switching pgpt-> ngpt \n", __func__);
+	INFO("%s: Switching pgpt(%lx) -> ngpt(%lx) \n", __func__,
+			(uint64_t)gpt_config.plat_gpt_l0_pgpt_base,
+			(uint64_t)gpt_config.plat_gpt_l0_base);
+#if 0
 	write_gptbr_el3(((gpt_config.plat_gpt_l0_base >> GPTBR_BADDR_VAL_SHIFT)
 			>> GPTBR_BADDR_SHIFT) & GPTBR_BADDR_MASK);
 
+#endif 
 	/* Invalidate any stale TLB entries and any cached register fields */
 	tlbipaallos();
 	dsb();

@@ -479,9 +479,17 @@ MEASURED_BOOT
 #endif
 
 #if ENABLE_PORTAL
+#define ARM_MAP_L0_PGPT_REGION		MAP_REGION_FLAT(ARM_L0_PGPT_ADDR_BASE,	\
+						ARM_L0_PGPT_SIZE,		\
+						MT_MEMORY | MT_RW | MT_ROOT)
+
+
+
+#if 0
 #define ARM_MAP_PORTAL_REGION		MAP_REGION_FLAT(SMMU_BASE,	\
 						SMMU_REG_SIZE,		\
 						MT_MEMORY | MT_RW | MT_ROOT)
+#endif 
 #endif 
 
 /*
@@ -592,7 +600,7 @@ MEASURED_BOOT
 #define ARM_L0_GPT_ADDR_BASE		(ARM_FW_CONFIGS_LIMIT)
 #define ARM_L0_GPT_LIMIT		(ARM_L0_GPT_ADDR_BASE + ARM_L0_GPT_SIZE)
 
-#if ENABLE_PORTAL
+#if ENABLE_PORTAL 
 #define ARM_L0_PGPT_SIZE		(PAGE_SIZE)
 #define ARM_L0_PGPT_ADDR_BASE		(ARM_L0_GPT_LIMIT)
 #define ARM_L0_PGPT_LIMIT		(ARM_L0_PGPT_ADDR_BASE + ARM_L0_PGPT_SIZE)
@@ -600,6 +608,7 @@ MEASURED_BOOT
 
 #else
 #define ARM_L0_GPT_SIZE			U(0)
+#define ARM_L0_PGPT_SIZE		U(0)
 #endif
 
 /*******************************************************************************

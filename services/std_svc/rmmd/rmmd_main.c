@@ -253,7 +253,7 @@ static uint64_t	rmmd_smc_forward(uint32_t src_sec_state,
 	if (src_sec_state == NON_SECURE && dst_sec_state == REALM) { 
 		//Entering REALM
 		switch_ngpt_to_pgpt();
-	} else if (src_sec_state == REAL && dst_sec_state == NON_SECUREM) { 
+	} else if (src_sec_state == REALM && dst_sec_state == NON_SECURE) { 
 		//Returning to NW
 		switch_pgpt_to_ngpt();
 	}

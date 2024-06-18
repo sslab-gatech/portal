@@ -114,8 +114,8 @@
 							       GPT_GPI_ROOT)
 
 #define	ARM_PAS_GPTS			GPT_MAP_REGION_GRANULE(ARM_L1_GPT_ADDR_BASE, \
-							       ARM_L1_GPT_SIZE + \
-							       ARM_L1_PGPT_SIZE, \
+							       (ARM_L1_GPT_SIZE + \
+							       ARM_L1_PGPT_SIZE), \
 							       GPT_GPI_ROOT)
 
 
