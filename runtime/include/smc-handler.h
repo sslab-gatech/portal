@@ -91,5 +91,10 @@ unsigned long smc_rtt_set_ripas(unsigned long rd_addr,
 				unsigned long ulevel,
 				unsigned long uripas);
 
+unsigned long smc_portal_attach_dev (unsigned long dev_addr);
+
+
+unsigned long smc_portal_create_q(unsigned long q_addr,
+				  unsigned long vmid);
 
 #endif /* SMC_HANDLER_H */

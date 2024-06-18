@@ -65,6 +65,7 @@ target_sources(rmm-runtime
             "rmi/rec.c"
             "rmi/rtt.c"
             "rmi/run.c"
+	    "rmi/portal.c"
             "rmi/system.c")
 
 target_sources(rmm-runtime

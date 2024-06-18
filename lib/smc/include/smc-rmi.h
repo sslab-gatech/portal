@@ -314,6 +314,11 @@
  */
 #define SMC_RMM_RTT_SET_RIPAS			SMC64_RMI_FID(U(0x19))
 
+
+
+#define SMC_RMM_ATTACH_DEV			SMC64_RMI_FID(U(0x1a))
+#define SMC_RMM_CREATE_Q			SMC64_RMI_FID(U(0x1b))
+
 /* Size of Realm Personalization Value */
 #define RPV_SIZE		64
 
