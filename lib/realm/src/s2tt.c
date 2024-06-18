@@ -17,6 +17,7 @@
 #include <stddef.h>
 #include <string.h>
 #include <table.h>
+#include <debug.h>
 
 /*
  * For prototyping we assume 4K pages
@@ -70,8 +71,14 @@
 #define S2TTE_TABLE	S2TTE_L012_TABLE
 #define S2TTE_BLOCK	(S2TTE_ATTRS | S2TTE_L012_BLOCK)
 #define S2TTE_PAGE	(S2TTE_ATTRS | S2TTE_L3_PAGE)
+#if 1 //make untrusted executable
+#define S2TTE_BLOCK_NS	(S2TTE_NS |  S2TTE_AF | S2TTE_L012_BLOCK)
+#define S2TTE_PAGE_NS	(S2TTE_NS |  S2TTE_AF | S2TTE_L3_PAGE)
+#endif
+#if 0
 #define S2TTE_BLOCK_NS	(S2TTE_NS | S2TTE_XN | S2TTE_AF | S2TTE_L012_BLOCK)
 #define S2TTE_PAGE_NS	(S2TTE_NS | S2TTE_XN | S2TTE_AF | S2TTE_L3_PAGE)
+#endif 
 #define S2TTE_INVALID	0
 
 /*
@@ -460,6 +467,9 @@ unsigned long s2tte_create_invalid_ns(void)
 unsigned long s2tte_create_valid_ns(unsigned long s2tte, long level)
 {
 	assert(level >= RTT_MIN_BLOCK_LEVEL);
+	if (s2tte & S2TTE_XN) {
+		INFO("OS honestly set the XN bit as true!!\n\n\n\n");
+	}
 	if (level == RTT_PAGE_LEVEL) {
 		return (s2tte | S2TTE_PAGE_NS);
 	}

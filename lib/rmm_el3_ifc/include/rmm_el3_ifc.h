@@ -16,13 +16,14 @@
 /*************************************
  * SMC codes for the EL3-RMM interface
  *************************************/
-					/* 0x1B0 - 0x1B3 */
+					/* 0x1B0 - 0x1B4 */
 #define SMC_RMM_GTSI_DELEGATE		SMC64_STD_FID(RMM_EL3, U(0))
 #define SMC_RMM_GTSI_UNDELEGATE		SMC64_STD_FID(RMM_EL3, U(1))
 
-					/* 0x1B2 - 0x1B3 */
+					/* 0x1B2 - 0x1B4 */
 #define SMC_RMM_GET_REALM_ATTEST_KEY	SMC64_STD_FID(RMM_EL3, U(2))
 #define SMC_RMM_GET_PLAT_TOKEN		SMC64_STD_FID(RMM_EL3, U(3))
+#define SMC_RMM_SET_PORTAL		SMC64_STD_FID(RMM_EL3, U(4))
 
 					/* 0x1CF */
 #define SMC_RMM_BOOT_COMPLETE		SMC64_STD_FID(RMM_EL3, U(0x1F))

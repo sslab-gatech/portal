@@ -126,8 +126,10 @@ void inject_sync_idabort(unsigned long fsc)
 	unsigned long pstate = calc_pstate();
 
 
+#if 0
 	INFO("Injecting abort %lx: far_el2:%lx elr_el2:%lx spsr_el2:%lx esr_el1:%lx next_pc:%lx pstate:%lx \n",
 		       	fsc, far_el2, elr_el2, spsr_el2, esr_el1, pc, pstate);
+#endif 
 	write_far_el12(far_el2); //faulting virtual address to guest
 	write_elr_el12(elr_el2); //return address to guest
 	write_spsr_el12(spsr_el2);
@@ -171,3 +173,10 @@ void realm_inject_undef_abort(void)
 	write_elr_el2(pc);
 	write_spsr_el2(pstate);
 }
+
+
+//FAR -  Fault Address Register, Holds the faulting Virtual Address for all synchronous Instruction Abort exceptions
+//ELR -  Exception Link Register
+//SPSR – Saved Program Status Register
+//VBAR - Vector Based Address Registers
+//ESR -  Exception Syndrome Register

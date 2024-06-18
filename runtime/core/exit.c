@@ -25,6 +25,7 @@
 #include <rsi-logger.h>
 #include <rsi-memory.h>
 #include <rsi-walk.h>
+#include <rsi-portal.h>
 #include <smc-rmi.h>
 #include <smc-rsi.h>
 #include <status.h>
@@ -572,6 +573,11 @@ static bool handle_realm_rsi(struct rec *rec, struct rmi_rec_exit *rec_exit)
 		INFO("SMC_RSI_HOST_DEBUG:%ld\n", (rec->regs[1]));
 		break; 
 	}
+	case SMC_RSI_SET_PORTAL: {
+		handle_rsi_set_portal();
+		INFO("SMC_RSI_SET_PORTAL:%ld\n", (rec->regs[1]));
+		break;
+	 }
 	default:
 		rec->regs[0] = SMC_UNKNOWN;
 		break;

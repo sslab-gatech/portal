@@ -80,6 +80,16 @@ static void complete_set_ripas(struct rec *rec)
 	}
 }
 
+static void complete_portal_management(struct rd *rd, struct rec *rec)
+{
+	if (!rd->need_dev_manage) //no need to handle
+	{
+		return ;
+	} else { //need to inject 
+		inject_sync_idabort_rec(rec, 0x1000);
+	}
+}
+
 static bool complete_sea_insertion(struct rec *rec, struct rmi_rec_entry *rec_entry)
 {
 	unsigned long esr = rec->last_run_info.esr;
@@ -262,6 +272,9 @@ unsigned long smc_rec_enter(unsigned long rec_addr,
 		ret = RMI_ERROR_REC;
 		goto out_unmap_buffers;
 	}
+
+	//need to check if device management operation should be completed 
+	complete_portal_management(rd, rec);
 
 	complete_set_ripas(rec);
 	complete_sysreg_emulation(rec, &rec_run.entry);

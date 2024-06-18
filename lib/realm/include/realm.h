@@ -83,6 +83,8 @@ struct rd {
 
 	/* Realm Personalization Value */
 	unsigned char rpv[RPV_SIZE];
+
+	bool need_dev_manage;
 };
 COMPILER_ASSERT(sizeof(struct rd) <= GRANULE_SIZE);
 
