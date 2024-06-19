@@ -21,6 +21,9 @@
 		toolchain __STRING(major) "." \
 		__STRING(minor) "." __STRING(patch)
 
+//for portal
+unsigned long rd_system_realm_addr;
+
 static void rmm_arch_init(void)
 {
 	MPAM(write_mpam2_el2(MPAM2_EL2_INIT));
@@ -36,6 +39,8 @@ static void rmm_arch_init(void)
 
 void rmm_warmboot_main(void)
 {
+	/* init system realm address as 0x0 */
+	rd_system_realm_addr = 0x0; 
 	/*
 	 * Do the rest of RMM architecture init
 	 */
