@@ -350,7 +350,14 @@ struct rmi_realm_params {
 			long rtt_level_start;			/* 0x810 */
 			/* Number of starting level RTTs */
 			unsigned int rtt_num_start;		/* 0x818 */
-		   }, 0x800, 0x1000);
+		   }, 0x800, 0x900);
+	SET_MEMBER_RMI(struct {
+			/* Is it System Realm? */
+			int system_realm;			/* 0x900 */
+			/* \FIXME{Something needed to verify it is system realm \
+			 * distributed by trusted parties. Current implmentation
+			 * does not check this property } */
+		   }, 0x900, 0x1000);
 };
 
 /*

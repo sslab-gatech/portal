@@ -327,6 +327,11 @@ unsigned long smc_realm_create(unsigned long rd_addr,
 
 	realm_params_measure(rd, &p);
 
+	//save system realm's rd address 
+	if (p.system_realm == SYSTEM_REALM) {
+		assert(rd_system_realm_addr == 0x0);
+		rd_system_realm_addr = rd_addr;
+	}
 	buffer_unmap(rd);
 
 	granule_unlock_transition(g_rd, GRANULE_STATE_RD);
