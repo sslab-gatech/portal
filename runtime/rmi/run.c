@@ -80,14 +80,25 @@ static void complete_set_ripas(struct rec *rec)
 	}
 }
 
-static void complete_portal_management(struct rd *rd, struct rec *rec)
+static bool complete_portal_management(struct rd *rd, struct rec *rec)
 {
-	if (!rd->need_dev_manage) //no need to handle
+	enum portal_event event  = rd->portal_event;
+
+	if (event >= CMD_Q_ATTACH_INT && 
+			event < PORTAL_EVENT_COUNT)
 	{
-		return ;
-	} else { //need to inject 
-		inject_sync_idabort_rec(rec, 0x1000);
-	}
+		switch (event) {
+			case CMD_Q_ATTACH_INT:
+				break;
+			case DEV_ATTACH_INT:
+				break;
+			case DEV_DETACH_INT:
+				break;
+			default:
+				return false;
+		}
+	} 
+	return true; 
 }
 
 static bool complete_sea_insertion(struct rec *rec, struct rmi_rec_entry *rec_entry)
@@ -273,8 +284,13 @@ unsigned long smc_rec_enter(unsigned long rec_addr,
 		goto out_unmap_buffers;
 	}
 
-	//need to check if device management operation should be completed 
-	complete_portal_management(rd, rec);
+	/* XXX{What happens if portal and sea instruction events are 
+	 * set at the same time? */
+
+	if (!complete_portal_management(rd, rec)) {
+		ret = RMI_ERROR_REC;
+		goto out_unmap_buffers;
+	}
 
 	complete_set_ripas(rec);
 	complete_sysreg_emulation(rec, &rec_run.entry);

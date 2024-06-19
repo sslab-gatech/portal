@@ -88,6 +88,8 @@ struct rd {
 	bool need_dev_manage;
 
 	struct p_cmd_queue *cmd_queue; 
+
+	enum portal_event portal_event;
 };
 COMPILER_ASSERT(sizeof(struct rd) <= GRANULE_SIZE);
 

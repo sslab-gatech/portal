@@ -32,7 +32,8 @@ unsigned long smc_portal_create_q(unsigned long q_addr,
 	//unsigned int vmid; 
 	//vmid = rd->s2_ctx.vmid;
 	
-	//assert(system_rd_addr == XXX);
+	//check the provided address is system realm's rd
+	assert(system_rd_addr == rd_system_realm_addr);
 	if (!find_lock_two_granules(q_addr, 
 				    GRANULE_STATE_DELEGATED,
 				    &g_queue,
@@ -44,7 +45,9 @@ unsigned long smc_portal_create_q(unsigned long q_addr,
 	rd = granule_map(g_rd, SLOT_RD);
 	cmd_queue = granule_map(g_queue, SLOT_DELEGATED);
 
-	//assign command queue to the RD 
+	//initialize command queue 
+
+	//bind command queue to the target RD
 	rd->cmd_queue = cmd_queue;
 	granule_unlock(g_rd);
 
@@ -82,8 +85,10 @@ unsigned long smc_portal_create_q(unsigned long q_addr,
 	s2tte_write(&s2tt[wi.index], s2tte);
 	s2tte = s2tte_read(&s2tt[wi.index]);
 	
-	//inject interrupt to system realm
-	//get_system_realm();
+	/* set flag in system realm's rd so that interrupt can be handled
+	 * by the next REC_ENTER. */
+	system_rd->portal_event = CMD_Q_ATTACH_INT;
+	
 	__granule_get(wi.g_llt);
 
 	
