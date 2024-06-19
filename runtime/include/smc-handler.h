@@ -95,6 +95,7 @@ unsigned long smc_portal_attach_dev (unsigned long dev_addr);
 
 
 unsigned long smc_portal_create_q(unsigned long q_addr,
-				  unsigned long vmid);
+				  unsigned long rd_addr,
+				  unsigned long system_rd_addr);
 
 #endif /* SMC_HANDLER_H */

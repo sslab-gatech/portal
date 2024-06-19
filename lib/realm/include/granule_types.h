@@ -184,7 +184,10 @@ enum granule_state {
 	 *   - Assigned s2tte.
 	 */
 	GRANULE_STATE_RTT,
-	GRANULE_STATE_LAST = GRANULE_STATE_RTT
+
+
+	GRANULE_STATE_CMD_QUEUE, 
+	GRANULE_STATE_LAST = GRANULE_STATE_CMD_QUEUE
 };
 
 struct granule {

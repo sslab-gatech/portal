@@ -149,7 +149,7 @@ static const struct smc_handler smc_handlers[] = {
 	HANDLER_3(SMC_RMM_RTT_INIT_RIPAS,	 smc_rtt_init_ripas,		false, false),
 	HANDLER_5(SMC_RMM_RTT_SET_RIPAS,	 smc_rtt_set_ripas,		false, false),
 	HANDLER_1(SMC_RMM_ATTACH_DEV,		 smc_portal_attach_dev,		false, false),
-	HANDLER_2(SMC_RMM_CREATE_Q,		 smc_portal_create_q,		false, false)
+	HANDLER_3(SMC_RMM_CREATE_Q,		 smc_portal_create_q,		false, false)
 };
 
 COMPILER_ASSERT(ARRAY_LEN(smc_handlers) == SMC64_NUM_FIDS_IN_RANGE(RMI));

@@ -11,6 +11,7 @@
 #include <memory.h>
 #include <rec.h>
 #include <table.h>
+#include <portal.h>
 
 #define REALM_STATE_NEW		0
 #define REALM_STATE_ACTIVE	1
@@ -85,6 +86,8 @@ struct rd {
 	unsigned char rpv[RPV_SIZE];
 
 	bool need_dev_manage;
+
+	struct p_cmd_queue *cmd_queue; 
 };
 COMPILER_ASSERT(sizeof(struct rd) <= GRANULE_SIZE);
 
