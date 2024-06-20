@@ -315,9 +315,9 @@
 #define SMC_RMM_RTT_SET_RIPAS			SMC64_RMI_FID(U(0x19))
 
 
-
-#define SMC_RMM_DEV_MNG 			SMC64_RMI_FID(U(0x1a))
-#define SMC_RMM_CREATE_Q			SMC64_RMI_FID(U(0x1b))
+/* portal RMI call */
+#define SMC_RMM_DEV_MNG 			SMC64_RMI_FID(U(0x1A))
+#define SMC_RMM_CREATE_Q			SMC64_RMI_FID(U(0x1B))
 
 /* Size of Realm Personalization Value */
 #define RPV_SIZE		64

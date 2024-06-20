@@ -104,6 +104,9 @@ rb_node *create_node (rb_tree *tree, device_info dev_info) {
 	rb_node *node = pool_alloc(&tree->pool);
 	node->dev_info.base = dev_info.base;
 	node->dev_info.size = dev_info.size;
+	node->dev_info.state = dev_info.state;
+	node->dev_info.owner = dev_info.owner; 
+
 	strlcpy(node->dev_info.dev_name, dev_info.dev_name,
 		sizeof(node->dev_info.dev_name));
 	node->color = RED;

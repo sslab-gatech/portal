@@ -6,12 +6,17 @@
 #ifndef REALM_H
 #define REALM_H
 
+//XXX{Need to be moved to compiler option..}   
+#define ENABLE_PORTAL 0x1
 #include <assert.h>
 #include <measurement.h>
 #include <memory.h>
 #include <rec.h>
 #include <table.h>
+#if ENABLE_PORTAL
 #include <portal.h>
+#include <rbtree.h>
+#endif 
 
 #define REALM_STATE_NEW		0
 #define REALM_STATE_ACTIVE	1

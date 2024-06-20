@@ -7,6 +7,7 @@
 #define SMC_HANDLER_H
 
 #include <smc.h>
+#include <portal.h>
 
 unsigned long smc_version(void);
 
@@ -91,8 +92,9 @@ unsigned long smc_rtt_set_ripas(unsigned long rd_addr,
 				unsigned long ulevel,
 				unsigned long uripas);
 
-unsigned long smc_portal_dev_manage(unsigned long dev_addr);
-
+unsigned long smc_portal_dev_manage(unsigned long rd_addr,
+                                    unsigned long dev_addr,
+                                    unsigned long cmd);
 
 unsigned long smc_portal_create_queue(unsigned long q_addr,
 				  unsigned long rd_addr,

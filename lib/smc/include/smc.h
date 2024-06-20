@@ -73,7 +73,7 @@
 #define SMC64_PSCI_FNUM_MAX	(U(0x14))
 
 #define SMC64_RMI_FNUM_MIN	(U(0x150))
-#define SMC64_RMI_FNUM_MAX	(U(0x169 + 2))
+#define SMC64_RMI_FNUM_MAX	(U(0x169 + 0x3))
 
 #define SMC64_RSI_FNUM_MIN	(U(0x190))
 #define SMC64_RSI_FNUM_MAX	(U(0x1AF))
@@ -123,7 +123,7 @@
 	(IS_SMC32_FID_STD_FAST(_fid) && IS_SMC32_FID_IN_RANGE(_range, _fid))
 
 #define SMC64_NUM_FIDS_IN_RANGE(_range)					   \
-	(SMC64_##_range##_FNUM_MAX - SMC64_##_range##_FNUM_MIN + 1)
+	(SMC64_##_range##_FNUM_MAX - SMC64_##_range##_FNUM_MIN)
 
 /* Gets the offset in a range. Inputs must be pre-verified */
 #define SMC64_FID_OFFSET_FROM_RANGE_MIN(_range, _fid)			   \

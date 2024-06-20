@@ -10,9 +10,35 @@
 #include <debug.h>
 
 
-unsigned long smc_portal_dev_manage(unsigned long dev_addr)
+unsigned long smc_portal_dev_manage(unsigned long rd_addr,
+				    unsigned long dev_addr, 
+				    unsigned long cmd)
 {
-	//need to maintain list of the devices.
+	/* search device rb_tree. The base address should exactly match */
+	rb_node *dev_node = search_rb_tree(&rb_dev_tree, dev_addr);
+	if (dev_node == NULL) {
+		INFO("Requested device does not exist \n");
+		return RMI_ERROR_INPUT;
+	} 
+
+	switch ((enum portal_dev_mng_cmd)cmd) {
+		case DEV_ATTACH: 
+
+			break;
+
+		case DEV_DETACH:
+
+			break;
+		case DEV_IN_TRANSIT: // can only be invoked by system realm
+
+			break;
+
+		default:
+			return RMI_ERROR_INPUT;
+	}
+
+
+
 
 	return 0;
 }

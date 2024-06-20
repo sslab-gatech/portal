@@ -3,14 +3,18 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <portal.h>
 
 #define MAX_NODES 50 //dirty hack
+
 
 typedef enum {RED, BLACK} node_color;
 
 typedef struct {
         unsigned long base;
         size_t size;
+	enum portal_dev_state state;
+	struct rd *owner; 
         char dev_name[50];
 } device_info;
 
@@ -38,4 +42,7 @@ typedef struct rb_tree {
 void rb_insert(rb_tree *tree, device_info dev_info);
 void init_rb_tree(rb_tree *tree);
 rb_node *search_rb_tree(rb_tree *tree, unsigned long base);
+
+//make rb_dev_tree globally accessible through multiple files.
+extern rb_tree rb_dev_tree; 
 #endif 
