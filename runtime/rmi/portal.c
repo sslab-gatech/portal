@@ -26,43 +26,51 @@ unsigned long smc_portal_dev_manage(unsigned long rd_addr,
 			switch (dev_node->dev_info.state) {
 				/* Request device to host */
 				case DEV_EMPTY:
-				      break;
+					dev_node->dev_info.state = DEV_OCCUPIED;
+					break;
 			    	/* Currently just grab the device from other realm.
 			    	 * In the future it needs internal scheduler to 
 			    	 * decide whether the device should be attached
 			    	 */
 				case DEV_OCCUPIED:
-				      break;
+					dev_node->dev_info.state = DEV_IN_TRANSIT;
+					break;
 
 			      	/* cannot occupy the device in-transit */
 				case DEV_IN_TRANSIT:
-				      return RMI_ERROR_IN_USE;
+					return RMI_ERROR_IN_USE;
 
 				default:
-				      return RMI_ERROR_INPUT;
+					return RMI_ERROR_INPUT;
 			}
 			break;
 
 		case DEV_DETACH:
 			switch (dev_node->dev_info.state) {
 				case DEV_IN_TRANSIT:
+
+					dev_node->dev_info.state = DEV_DETACHED;
 					break;
 
 				/* all other cases are error */
 				default:
 					return RMI_ERROR_INPUT;
 					break;
-
-
 			}
 			break;
 
 		case DEV_OCCUPY: 
-			// Occupy can be only be issued from system realm
+			/* Occupy cmd can be only be issued from system realm.
+			 * After the SMMU setting is done, it can finally be 
+			 * assigned to the realm 
+			 */
+
 			if (!is_system_realm(rd_addr))
 				return RMI_ERROR_REALM;
 			switch (dev_node->dev_info.state) {
 				case DEV_DETACHED:
+
+					dev_node->dev_info.state = DEV_OCCUPIED;
 					break;
 				default:
 					return RMI_ERROR_INPUT;
@@ -98,7 +106,7 @@ unsigned long smc_portal_create_queue(unsigned long q_addr,
 	//vmid = rd->s2_ctx.vmid;
 	
 	//check the provided address is system realm's rd
-	assert(system_rd_addr == rd_system_realm_addr);
+	assert(!is_system_realm(system_rd_addr));
 	if (!find_lock_two_granules(q_addr, 
 				    GRANULE_STATE_DELEGATED,
 				    &g_queue,
