@@ -9,12 +9,15 @@
 #include <string.h>
 #include <debug.h>
 
-unsigned long smc_portal_attach_dev(unsigned long dev_addr)
+
+unsigned long smc_portal_dev_manage(unsigned long dev_addr)
 {
+	//need to maintain list of the devices.
+
 	return 0;
 }
 
-unsigned long smc_portal_create_q(unsigned long q_addr,
+unsigned long smc_portal_create_queue(unsigned long q_addr,
 	       			  unsigned long rd_addr,
 				  unsigned long system_rd_addr)
 {

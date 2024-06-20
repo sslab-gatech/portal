@@ -274,20 +274,21 @@ unsigned long smc_rec_enter(unsigned long rec_addr,
 		goto out_unmap_buffers;
 	}
 
+#if ENABLE_PORTAL
+	/* XXX{What happens if portal and sea instruction events are 
+	 * set at the same time? */
+	if (!complete_portal_management(rd, rec)) {
+		ret = RMI_ERROR_REC;
+		goto out_unmap_buffers;
+	}
+#endif 
+
 	if (!complete_mmio_emulation(rec, &rec_run.entry)) {
 		ret = RMI_ERROR_REC;
 		goto out_unmap_buffers;
 	}
 
 	if (!complete_sea_insertion(rec, &rec_run.entry)) {
-		ret = RMI_ERROR_REC;
-		goto out_unmap_buffers;
-	}
-
-	/* XXX{What happens if portal and sea instruction events are 
-	 * set at the same time? */
-
-	if (!complete_portal_management(rd, rec)) {
 		ret = RMI_ERROR_REC;
 		goto out_unmap_buffers;
 	}

@@ -316,7 +316,7 @@
 
 
 
-#define SMC_RMM_ATTACH_DEV			SMC64_RMI_FID(U(0x1a))
+#define SMC_RMM_DEV_MNG 			SMC64_RMI_FID(U(0x1a))
 #define SMC_RMM_CREATE_Q			SMC64_RMI_FID(U(0x1b))
 
 /* Size of Realm Personalization Value */
