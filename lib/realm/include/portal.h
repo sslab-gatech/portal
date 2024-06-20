@@ -1,6 +1,8 @@
 #ifndef PORTAL_H
 #define PORTAL_H
 
+#include <rbtree.h>
+
 //XXX{Need to be moved to compiler option..}
 #define ENABLE_PORTAL 0x1
 #define SYSTEM_REALM 0x1
@@ -8,6 +10,7 @@
 
 //global variable for system realm's rd
 extern unsigned long rd_system_realm_addr;
+extern rb_tree *dev_tree; 
 
 
 #if 0

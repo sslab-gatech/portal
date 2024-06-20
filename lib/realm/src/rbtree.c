@@ -1,24 +1,5 @@
-#include <stdio.h>
-#include <stdlib.h>
-
-typedef enum {RED, BLACK} node_color;
-
-typedef struct {
-	unsigned long base;
-	size_t size;
-	char *dev_name;
-} device_info;
-
-typedef struct rb_node {
-	device_info dev_info;
-	node_color color;
-	struct rb_node *left, *right, *parent; 
-} rb_node;
-
-typedef struct rb_tree {
-	rb_node *root;
-	rb_node *NIL;
-} rb_tree;
+#include <rbtree.h>
+#include <string.h>
 
 void left_rotate(rb_tree *tree, rb_node *x) {
 	rb_node *y = x->right;
@@ -100,7 +81,9 @@ rb_node *create_node (rb_tree *tree, device_info dev_info) {
 	rb_node *node = (rb_node *)malloc(sizeof(rb_node));
 	node->dev_info.base = dev_info.base;
 	node->dev_info.size = dev_info.size;
-	node->dev_info.name = strdup(dev_info.name);
+	node->dev_info.dev_name = (char *)malloc(strlen(dev_info.dev_name) + 1);
+	strlcpy(node->dev_info.dev_name, dev_info.dev_name,
+		strlen(dev_info.dev_name) + 1);
 	node->color = RED;
 	node->left = tree->NIL;
 	node->right = tree->NIL;
@@ -149,7 +132,7 @@ void free_rb_tree_nodes(rb_tree *tree, rb_node *node) {
 	if (node != tree->NIL) {
 		free_rb_tree_nodes(tree, node->left);
 		free_rb_tree_nodes(tree, node->right);
-		free(node->dev_info.name);
+		free(node->dev_info.dev_name);
 		free(node);
 	}
 }
@@ -164,13 +147,13 @@ void free_rb_tree(rb_tree *tree) {
 }
 
 
-rb_node *search_rb_tree(rbtree *tree, unsigned long base)
+rb_node *search_rb_tree(rb_tree *tree, unsigned long base)
 {
 	rb_node *current = tree->root;
 
-	while (current != tree->nil && base != current->dev_info.base) {
+	while (current != tree->NIL && base != current->dev_info.base) {
 		if (base < current->dev_info.base) {
-			current = currnet->left;
+			current = current->left;
 		} else {
 			current = current->right;
 		}

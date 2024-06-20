@@ -9,6 +9,7 @@
 #include <debug.h>
 #include <rmm_el3_ifc.h>
 #include <smc-rmi.h>
+#include <realm.h>
 #include <smc-rsi.h>
 
 #ifdef NDEBUG
@@ -39,6 +40,9 @@ static void rmm_arch_init(void)
 
 void rmm_warmboot_main(void)
 {
+	/* need to initialize device lists  */
+	dev_tree = create_rb_tree();
+
 	/* init system realm address as 0x0 */
 	rd_system_realm_addr = 0x0; 
 	/*

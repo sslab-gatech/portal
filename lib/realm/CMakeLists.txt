@@ -41,7 +41,8 @@ target_include_directories(rmm-lib-realm
 target_sources(rmm-lib-realm
     PRIVATE "src/buffer.c"
             "src/granule.c"
-            "src/s2tt.c"
+	    "src/s2tt.c"
+	    "src/rbtree.c"
             "src/sve.c")
 
 if(RMM_ARCH STREQUAL fake_host)
