@@ -1,5 +1,28 @@
 #include <rbtree.h>
+#include <debug.h>
+#include <stdlib.h>
 #include <string.h>
+
+/* Implementation is dirty because malloc is not supported in rmm
+ * No free for the memory pool */
+// Allocate a node from the memory pool
+rb_node *pool_alloc(memory_pool *pool) {
+    for (int i = 0; i < MAX_NODES; i++) {
+        if (pool->used[i] == 0) {
+            pool->used[i] = 1;
+            return &pool->pool[i];
+        }
+    }
+    panic();
+    return NULL; // No free node available
+}
+
+void init_memory_pool(memory_pool *pool) {
+    for (int i = 0; i < MAX_NODES; i++) {
+        pool->used[i] = 0; // Mark all nodes as unused
+    }
+    pool->next_free = 0;
+}
 
 void left_rotate(rb_tree *tree, rb_node *x) {
 	rb_node *y = x->right;
@@ -78,12 +101,11 @@ void rb_insert_fixup(rb_tree *tree, rb_node *z) {
 }
 
 rb_node *create_node (rb_tree *tree, device_info dev_info) {
-	rb_node *node = (rb_node *)malloc(sizeof(rb_node));
+	rb_node *node = pool_alloc(&tree->pool);
 	node->dev_info.base = dev_info.base;
 	node->dev_info.size = dev_info.size;
-	node->dev_info.dev_name = (char *)malloc(strlen(dev_info.dev_name) + 1);
 	strlcpy(node->dev_info.dev_name, dev_info.dev_name,
-		strlen(dev_info.dev_name) + 1);
+		sizeof(node->dev_info.dev_name));
 	node->color = RED;
 	node->left = tree->NIL;
 	node->right = tree->NIL;
@@ -118,34 +140,15 @@ void rb_insert(rb_tree *tree, device_info dev_info) {
 	rb_insert_fixup(tree, z);
 }
 
+void init_rb_tree(rb_tree *tree) {
+	//initialize memory pool
+	init_memory_pool(&tree->pool);
 
-rb_tree* create_rb_tree() {
-	rb_tree *tree = (rb_tree *) malloc(sizeof(rb_tree));
-	tree->NIL = (rb_node *) malloc(sizeof(rb_node));
+	tree->NIL = pool_alloc(&tree->pool);
 	tree->NIL->color = BLACK;
 	tree->root = tree->NIL;
-	return tree;
+	return;
 }
-
-
-void free_rb_tree_nodes(rb_tree *tree, rb_node *node) {
-	if (node != tree->NIL) {
-		free_rb_tree_nodes(tree, node->left);
-		free_rb_tree_nodes(tree, node->right);
-		free(node->dev_info.dev_name);
-		free(node);
-	}
-}
-
-void free_rb_tree(rb_tree *tree) {
-	if (tree->root != tree->NIL) {
-		free_rb_tree_nodes(tree, tree->root);
-	}
-
-	free(tree->NIL);
-	free(tree);
-}
-
 
 rb_node *search_rb_tree(rb_tree *tree, unsigned long base)
 {
@@ -161,3 +164,4 @@ rb_node *search_rb_tree(rb_tree *tree, unsigned long base)
 
 	return current;
 }
+

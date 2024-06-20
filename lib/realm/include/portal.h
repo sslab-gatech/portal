@@ -10,7 +10,7 @@
 
 //global variable for system realm's rd
 extern unsigned long rd_system_realm_addr;
-extern rb_tree *dev_tree; 
+extern rb_tree rb_dev_tree; 
 
 
 #if 0

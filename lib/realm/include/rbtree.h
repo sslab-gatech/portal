@@ -4,12 +4,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define MAX_NODES 50 //dirty hack
+
 typedef enum {RED, BLACK} node_color;
 
 typedef struct {
         unsigned long base;
         size_t size;
-        char *dev_name;
+        char dev_name[50];
 } device_info;
 
 
@@ -19,14 +21,21 @@ typedef struct rb_node {
         struct rb_node *left, *right, *parent;
 } rb_node;
 
+typedef struct memory_pool {
+    rb_node pool[MAX_NODES]; // Pre-allocated pool of nodes
+    int used[MAX_NODES]; // Array to track used nodes
+    size_t next_free; // Next free index in the pool
+} memory_pool;
+
 typedef struct rb_tree {
         rb_node *root;
         rb_node *NIL;
+	memory_pool pool;
 } rb_tree;
 
 
+
 void rb_insert(rb_tree *tree, device_info dev_info);
-rb_tree* create_rb_tree(void);
-void free_rb_tree(rb_tree *tree);
+void init_rb_tree(rb_tree *tree);
 rb_node *search_rb_tree(rb_tree *tree, unsigned long base);
 #endif 

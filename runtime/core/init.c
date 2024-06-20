@@ -24,6 +24,7 @@
 
 //for portal
 unsigned long rd_system_realm_addr;
+rb_tree rb_dev_tree; 
 
 static void rmm_arch_init(void)
 {
@@ -40,8 +41,11 @@ static void rmm_arch_init(void)
 
 void rmm_warmboot_main(void)
 {
+	init_rb_tree(&rb_dev_tree);
 	/* need to initialize device lists  */
-	dev_tree = create_rb_tree();
+	//XXX{TF-a should pass device tree lists}
+	
+
 
 	/* init system realm address as 0x0 */
 	rd_system_realm_addr = 0x0; 
