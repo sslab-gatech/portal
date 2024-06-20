@@ -23,14 +23,50 @@ unsigned long smc_portal_dev_manage(unsigned long rd_addr,
 
 	switch ((enum portal_dev_mng_cmd)cmd) {
 		case DEV_ATTACH: 
+			switch (dev_node->dev_info.state) {
+				/* Request device to host */
+				case DEV_EMPTY:
+				      break;
+			    	/* Currently just grab the device from other realm.
+			    	 * In the future it needs internal scheduler to 
+			    	 * decide whether the device should be attached
+			    	 */
+				case DEV_OCCUPIED:
+				      break;
 
+			      	/* cannot occupy the device in-transit */
+				case DEV_IN_TRANSIT:
+				      return RMI_ERROR_IN_USE;
+
+				default:
+				      return RMI_ERROR_INPUT;
+			}
 			break;
 
 		case DEV_DETACH:
+			switch (dev_node->dev_info.state) {
+				case DEV_IN_TRANSIT:
+					break;
 
+				/* all other cases are error */
+				default:
+					return RMI_ERROR_INPUT;
+					break;
+
+
+			}
 			break;
-		case DEV_IN_TRANSIT: // can only be invoked by system realm
 
+		case DEV_OCCUPY: 
+			// Occupy can be only be issued from system realm
+			if (!is_system_realm(rd_addr))
+				return RMI_ERROR_REALM;
+			switch (dev_node->dev_info.state) {
+				case DEV_DETACHED:
+					break;
+				default:
+					return RMI_ERROR_INPUT;
+			}
 			break;
 
 		default:

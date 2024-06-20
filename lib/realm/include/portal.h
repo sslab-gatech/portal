@@ -9,6 +9,10 @@
 //global variable for system realm's rd
 extern unsigned long rd_system_realm_addr;
 
+inline int is_system_realm (unsigned long system_rd_addr)
+{
+	return (rd_system_realm_addr == system_rd_addr);
+}
 
 #if 0
 struct p_cmd_queue {
@@ -29,7 +33,9 @@ enum portal_event {
 enum portal_dev_state {
 	DEV_EMPTY,
 	DEV_OCCUPIED,
-	DEV_IN_TRANSIT
+	DEV_IN_TRANSIT,
+	DEV_DETACHED
+	
 };
 
 enum portal_dev_mng_cmd {
