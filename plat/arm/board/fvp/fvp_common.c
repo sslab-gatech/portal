@@ -185,6 +185,9 @@ const mmap_region_t plat_arm_mmap[] = {
 #endif
 #if ENABLE_RME
 	ARM_MAP_GPT_L1_DRAM,
+#if ENABLE_PORTAL
+	ARM_MAP_PGPT_L1_DRAM,
+#endif 
 	ARM_MAP_EL3_RMM_SHARED_MEM,
 #endif
 	{0}
