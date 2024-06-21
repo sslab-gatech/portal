@@ -357,3 +357,9 @@ FCONF_REGISTER_POPULATOR(HW_CONFIG, topology, fconf_populate_topology);
 FCONF_REGISTER_POPULATOR(HW_CONFIG, uart_config, fconf_populate_uart_config);
 FCONF_REGISTER_POPULATOR(HW_CONFIG, cpu_timer, fconf_populate_cpu_timer);
 FCONF_REGISTER_POPULATOR(HW_CONFIG, dram_layout, fconf_populate_dram_layout);
+
+/* Place holder for portal -> processing platform devices.
+ * This option hardens the fdt in the binary and then pass it to bl3 so that 
+ * bl3 can parse the fdt to understand platform devices. The other option is 
+ * passing fdt information from bl2 or edk.
+//FCONF_REGISTER_POPULATOR(PORTAL_CONFIG, traversing_dev, fconf_populate_devices);
