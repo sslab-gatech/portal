@@ -362,4 +362,5 @@ FCONF_REGISTER_POPULATOR(HW_CONFIG, dram_layout, fconf_populate_dram_layout);
  * This option hardens the fdt in the binary and then pass it to bl3 so that 
  * bl3 can parse the fdt to understand platform devices. The other option is 
  * passing fdt information from bl2 or edk.
+ */
 //FCONF_REGISTER_POPULATOR(PORTAL_CONFIG, traversing_dev, fconf_populate_devices);
