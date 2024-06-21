@@ -12,34 +12,25 @@ MODULE_AUTHOR("Your Name");
 MODULE_DESCRIPTION("A simple example Linux kernel module.");
 MODULE_VERSION("0.1");
 
-static int __init hello_init(void) {
-    void *codePage = kmalloc(4096, GFP_KERNEL);
-    char nop_instruction[4] = {0x1f, 0x20, 0x03, 0xd5}; // ARM64 NOP instruction
-    size_t num_nops = 4096 / sizeof(nop_instruction);
-    void (*nop_function)(void) = (void (*)(void))codePage;
-    size_t i = 0;
-
-    printk(KERN_INFO "Hello, world!\n\n\n\n\n\n\n");
-    
-    // Calculate the number of NOP instructions needed to fill the page
-
-    // Use memcpy to write NOP instructions to the page
-    for (i = 0; i < num_nops; ++i) {
-        memcpy((char *)codePage+ i * sizeof(nop_instruction), nop_instruction, sizeof(nop_instruction));
+void *aligned_kmalloc(size_t size, unsigned int alignment)
+{
+    void *ptr = kmalloc(size + alignment - 1, GFP_KERNEL);
+    if (ptr) {
+        uintptr_t addr = (uintptr_t)ptr + alignment - 1;
+        ptr = (void *)(addr - (addr % alignment));
     }
-    
-    set_memory_x((unsigned long)codePage, 1);
+    return ptr;
+}
 
-    nop_function();
+static int __init cca_test_init(void) {
 
-    //set_memory_portal_executable(test_func, 1);
 
     return 0; // Non-zero return means that the module couldn't be loaded.
 }
 
-static void __exit hello_exit(void) {
+static void __exit cca_test_exit(void) {
     printk(KERN_INFO "Goodbye, world!\n");
 }
 
-module_init(hello_init);
-module_exit(hello_exit);
+module_init(cca_test_init);
+module_exit(cca_test_exit);

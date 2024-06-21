@@ -214,7 +214,6 @@ static int __set_memory_encrypted(unsigned long addr,
 		set_memory_range_protected(start, end);
 	} else {
 		set_prot = PROT_NS_SHARED;
-		//clear_prot = PROT_PORTAL | PROT_NS_SHARED;
 		set_memory_range_shared(start, end);
 	}
 
@@ -241,11 +240,14 @@ static int __set_memory_portal(unsigned long addr,
 		set_prot =  PROT_NS_SHARED;
                 set_memory_range_portal(start, end);
         } else {
+
+#if 0
 		//this should be set later to indicate it is untrusted IPA
-		//set_prot = PROT_NS_SHARED;
-		set_prot = __pgprot(PTE_MAYBE_GP);
-		clear_prot = __pgprot(PTE_PXN);
-                set_memory_range_portal_executable(start,end);
+		set_prot = PROT_NS_SHARED;
+		clear_prot = PTE_PXN;
+		set_memory_range_shared(start, end); //make it shared temporary
+                //set_memory_range_portal_executable(start,end);
+#endif 
         }
         return __change_memory_common(addr, PAGE_SIZE * numpages,
                                       __pgprot(set_prot),
