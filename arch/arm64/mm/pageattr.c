@@ -242,6 +242,25 @@ int set_memory_portal(unsigned long addr, int numpages)
 	return __set_memory_encrypted(addr, numpages, false, true);
 }
 
+int set_memory_portal_executable(unsigned long addr, int numpages)
+{
+	unsigned long set_prot = 0, clear_prot = 0;
+	phys_addr_t start, end;
+
+
+	WARN_ON(!__is_lm_address(addr));
+	start = __virt_to_phys(addr);
+	end = start + numpages * PAGE_SIZE;
+
+	//make the page executable
+	set_prot = PTE_MAYBE_GP | PTE_RDONLY;
+	clear_prot = PTE_PXN | PTE_WRITE ;
+
+	return __change_memory_common(addr, PAGE_SIZE * numpages,
+				      __pgprot(set_prot),
+				      __pgprot(clear_prot));
+}
+
 #ifdef CONFIG_DEBUG_PAGEALLOC
 void __kernel_map_pages(struct page *page, int numpages, int enable)
 {

@@ -3765,6 +3765,64 @@ static void arm_smmu_rmr_install_bypass_ste(struct arm_smmu_device *smmu)
 	iort_put_rmr_sids(dev_fwnode(smmu->dev), &rmr_list);
 }
 
+
+#include <asm/rsi.h>
+#include <linux/set_memory.h>
+#include <linux/mem_encrypt.h>
+
+void *aligned_kmalloc(size_t size, unsigned int alignment)
+{
+    void *ptr = kmalloc(size + alignment - 1, GFP_KERNEL);
+    if (ptr) {
+        uintptr_t addr = (uintptr_t)ptr + alignment - 1;
+        ptr = (void *)(addr - (addr % alignment));
+    }
+    return ptr;
+}
+
+static int test_CCA(void) {
+    void *codePage = aligned_kmalloc(4096, 4096);
+    char nop_instruction[4] = {0x1f, 0x20, 0x03, 0xd5}; // ARM64 NOP instruction
+    char ret_instruction[4] = {0xc0, 0x03, 0x5f, 0xd6};
+
+    void (*nop_function)(void) = (void (*)(void))codePage;
+    size_t i = 0;
+
+    printk(KERN_INFO "Hello, world!\n\n\n\n\n\n\n");
+    printk(KERN_INFO "codePage address: %lx\n", (unsigned long)codePage);
+
+    // Calculate the number of NOP instructions needed to fill the page
+
+    memcpy((char *)codePage, nop_instruction, sizeof(nop_instruction));
+    memcpy((char *)codePage+sizeof(nop_instruction), ret_instruction, sizeof(ret_instruction));
+
+    printk("Reading exectuable function first 4 char: ");
+    for (i = 0; i < 8; i++) {
+            printk("%x ", *((char *)(codePage) + i));
+    }
+    printk("\n");
+
+    set_memory_portal_executable((unsigned long)codePage, 1);
+
+#if 0
+    memcpy((char *)codePage, nop_instruction, sizeof(nop_instruction));
+    memcpy((char *)codePage+sizeof(nop_instruction), ret_instruction, sizeof(ret_instruction));
+#endif 
+
+    printk("Reading exectuable function first 4 char: ");
+    for (i = 0; i < 8; i++) {
+            printk("%x ", *((char *)(codePage) + i));
+    }
+    printk("\n");
+
+    printk("before execution!\n");
+    nop_function();
+    printk("execution passed!\n");
+
+
+    return 0; // Non-zero return means that the module couldn't be loaded.
+}
+
 static int arm_smmu_device_probe(struct platform_device *pdev)
 {
 	int irq, ret;
@@ -3774,6 +3832,7 @@ static int arm_smmu_device_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	bool bypass;
 
+	//test_CCA();
 	smmu = devm_kzalloc(dev, sizeof(*smmu), GFP_KERNEL);
 	if (!smmu)
 		return -ENOMEM;
