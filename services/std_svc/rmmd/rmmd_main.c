@@ -249,6 +249,9 @@ static uint64_t	rmmd_smc_forward(uint32_t src_sec_state,
 
 
 #if ENABLE_PORTAL
+#if 0 
+	TEMPORALLY DISABLED for debugging..
+
 	/* Need to switch NGPT<->PGPT before forwarding smc */
 	if (src_sec_state == NON_SECURE) { 
 		//Entering REALM
@@ -257,6 +260,7 @@ static uint64_t	rmmd_smc_forward(uint32_t src_sec_state,
 		//Returning to NW
 		switch_pgpt_to_ngpt();
 	}
+#endif 
 #endif 
 
 	/* Restore outgoing security state */

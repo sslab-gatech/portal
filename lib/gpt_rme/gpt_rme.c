@@ -1463,7 +1463,7 @@ int gpt_set_portal (uint64_t base, size_t size,
 void switch_ngpt_to_pgpt()
 {
 	//implement switching for ngpt->pgpt
-	INFO("%s: Switching ngpt(%lx) -> pgpt(%lx) \n", __func__,
+	VERBOSE("%s: Switching ngpt(%lx) -> pgpt(%lx) \n", __func__,
 			(uint64_t)gpt_config.plat_gpt_l0_base, 
 			(uint64_t)gpt_config.plat_gpt_l0_pgpt_base);
 
@@ -1479,7 +1479,7 @@ void switch_ngpt_to_pgpt()
 void switch_pgpt_to_ngpt()
 {
 	//implement switching for pgpt->ngpt
-	INFO("%s: Switching pgpt(%lx) -> ngpt(%lx) \n", __func__,
+	VERBOSE("%s: Switching pgpt(%lx) -> ngpt(%lx) \n", __func__,
 			(uint64_t)gpt_config.plat_gpt_l0_pgpt_base,
 			(uint64_t)gpt_config.plat_gpt_l0_base);
 
