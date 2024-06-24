@@ -186,6 +186,8 @@ int handle_rme_exit(struct kvm_vcpu *vcpu, int rec_run_ret)
 		return rec_exit_ripas_change(vcpu);
 	case RMI_EXIT_HOST_CALL:
 		return rec_exit_host_call(vcpu);
+	/* need to handle RME_EXIT event for portal
+	 */
 	}
 
 	kvm_pr_unimpl("Unsupported exit reason: %u\n",

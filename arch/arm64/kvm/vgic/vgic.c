@@ -913,13 +913,16 @@ static inline void vgic_restore_state(struct kvm_vcpu *vcpu)
 {
 	if (!static_branch_unlikely(&kvm_vgic_global_state.gicv3_cpuif))
 		vgic_v2_restore_state(vcpu);
-	else if (vcpu_is_rec(vcpu))
+	else if (vcpu_is_rec(vcpu)) {
 		vgic_rmm_restore_state(vcpu);
+	}
 	else
 		__vgic_v3_restore_state(&vcpu->arch.vgic_cpu.vgic_v3);
 }
 
 /* Flush our emulation state into the GIC hardware before entering the guest. */
+#define PORTAL_EVENT 777U
+unsigned int counter = 0;
 void kvm_vgic_flush_hwstate(struct kvm_vcpu *vcpu)
 {
 	/*
@@ -939,6 +942,19 @@ void kvm_vgic_flush_hwstate(struct kvm_vcpu *vcpu)
 		return;
 
 	DEBUG_SPINLOCK_BUG_ON(!irqs_disabled());
+
+	/* before reaching here, insert portal interrupt so that it can be flushed
+	 * out to the vgic of the REALM later.
+	 */
+	counter ++;
+	if (counter > 500) {
+		//inject interrupt
+		pr_info("Injecting portal event (%d)\n", PORTAL_EVENT);
+		kvm_vgic_inject_irq(vcpu->kvm, vcpu->vcpu_id, PORTAL_EVENT,
+			            0, NULL);
+
+		counter = 0;
+	}
 
 	if (!list_empty(&vcpu->arch.vgic_cpu.ap_list_head)) {
 		raw_spin_lock(&vcpu->arch.vgic_cpu.ap_list_lock);
