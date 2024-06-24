@@ -82,4 +82,6 @@ void plat_setup(uint64_t x0, uint64_t x1, uint64_t x2, uint64_t x3)
 	fvp_set_dram_layout(plat_dram);
 
 	plat_warmboot_setup(x0, x1, x2, x3);
+
+	//need to initialize the dev tree
 }

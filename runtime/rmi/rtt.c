@@ -132,11 +132,11 @@ unsigned long smc_rtt_create(unsigned long rtt_addr, //host provided address tha
 	/* Unlock RD after locking RTT Root */
 	granule_unlock(g_rd);
 
-	INFO("Start Level:%d Target Level:%ld \t", sl, level);
+	VERBOSE("Start Level:%d Target Level:%ld \t", sl, level);
 	rtt_walk_lock_unlock(g_table_root, sl, ipa_bits,
 				map_addr, level - 1L, &wi);
 	if (wi.last_level != level - 1L) {
-		INFO("UPPER level RTT should be generated\n");
+		VERBOSE("UPPER level RTT should be generated\n");
 		//check why it works with 3level at first :*
 		ret = pack_return_code(RMI_ERROR_RTT, wi.last_level);
 		goto out_unlock_llt;
@@ -147,7 +147,7 @@ unsigned long smc_rtt_create(unsigned long rtt_addr, //host provided address tha
 	s2tt = granule_map(g_tbl, SLOT_DELEGATED); //new s2tt that needs to be added under parent_s2tt
 
 	if (s2tte_is_unassigned(parent_s2tte)) {
-		INFO("s2tte_is_unassigned\n");
+		VERBOSE("s2tte_is_unassigned\n");
 		/*
 		 * Note that if map_addr is an Unprotected IPA, the RIPAS field
 		 * is guaranteed to be zero, in both parent and child s2ttes.
@@ -165,14 +165,14 @@ unsigned long smc_rtt_create(unsigned long rtt_addr, //host provided address tha
 		__granule_get(wi.g_llt);
 
 	} else if (s2tte_is_destroyed(parent_s2tte)) {
-		INFO("s2tte_is_destroyed\n");
+		VERBOSE("s2tte_is_destroyed\n");
 		s2tt_init_destroyed(s2tt);
 		__granule_get(wi.g_llt);
 
 	} else if (s2tte_is_assigned(parent_s2tte, level - 1L)) {
 		unsigned long block_pa;
 
-		INFO("s2tte_is_assigned\n");
+		VERBOSE("s2tte_is_assigned\n");
 		/*
 		 * We should observe parent assigned s2tte only when
 		 * we create tables above this level.
@@ -191,7 +191,7 @@ unsigned long smc_rtt_create(unsigned long rtt_addr, //host provided address tha
 
 	} else if (s2tte_is_valid(parent_s2tte, level - 1L)) {
 		unsigned long block_pa;
-		INFO("s2tte_is_valid\n");
+		VERBOSE("s2tte_is_valid\n");
 
 		/*
 		 * We should observe parent valid s2tte only when
@@ -217,7 +217,7 @@ unsigned long smc_rtt_create(unsigned long rtt_addr, //host provided address tha
 
 	} else if (s2tte_is_valid_ns(parent_s2tte, level - 1L)) {
 		unsigned long block_pa;
-		INFO("s2tte_is_valid_ns\n");
+		VERBOSE("s2tte_is_valid_ns\n");
 
 		/*
 		 * We should observe parent valid_ns s2tte only when
@@ -242,7 +242,7 @@ unsigned long smc_rtt_create(unsigned long rtt_addr, //host provided address tha
 		__granule_refcount_inc(g_tbl, S2TTES_PER_S2TT);
 
 	} else if (s2tte_is_table(parent_s2tte, level - 1L)) {
-		INFO("s2tte_is_table\n");
+		VERBOSE("s2tte_is_table\n");
 		ret = pack_return_code(RMI_ERROR_RTT,
 					(unsigned int)(level - 1L));
 		goto out_unmap_table;
