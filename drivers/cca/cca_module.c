@@ -4,6 +4,10 @@
 #include <linux/kernel.h>
 #include <linux/vmalloc.h>
 
+#include <linux/irq.h>
+#include <linux/irqdesc.h>
+#include <linux/irqdomain.h>
+
 #include <linux/mem_encrypt.h>
 #include <linux/set_memory.h>
 #include <asm/rsi.h>
@@ -34,18 +38,19 @@ void *aligned_kmalloc(size_t size, unsigned int alignment)
 
 static int __init cca_test_init(void) {
 	
-	// Check if a mapping already exists for the virtual IRQ
+	// Check if a mapping already exists for the portal IRQ
 	unsigned int existing_irq = irq_find_mapping(NULL, PORTAL_INTERRUPT_NUM);
 
 	if (existing_irq) {
-		pr_err("A mapping already exists for virtual IRQ %u with usable IRQ %u\n", virtual_irq, existing_irq);
+		pr_err("A mapping already exists for virtual IRQ %u with usable IRQ %u\n", 
+				PORTAL_INTERRUPT_NUM, existing_irq);
 		return -ENXIO;
 	}
 	
 	//create IRQ mapping 
 	unsigned int irq_num = irq_create_mapping(NULL, PORTAL_INTERRUPT_NUM);
 	if (!irq_num) {
-		pr_err("Failed to create IRQ mapping for virtual IRQ %u\n", PORTAL_INTERRUPT_NUM);
+		pr_err("Failed to create IRQ mapping for portal IRQ %u\n", PORTAL_INTERRUPT_NUM);
 		return -ENXIO; 
 	}
 
