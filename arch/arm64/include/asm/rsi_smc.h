@@ -131,4 +131,10 @@ struct realm_config {
 
 #define SMC_RSI_HOST_DEBUG			SMC_RSI_FID(0x19a)
 
+/* RSI Call for Portal
+ *
+ */
+#define SMC_RSI_SET_PORTAL			SMC_RSI_FID(0x19b)
+#define SMC_RSI_DEV_MNG				SMC_RSI_FID(0x19c)
+
 #endif /* __SMC_RSI_H_ */

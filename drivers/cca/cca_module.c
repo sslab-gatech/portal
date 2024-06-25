@@ -9,7 +9,7 @@
 #include <asm/rsi.h>
 
 
-#define INTERRUPT_NUMBER 777
+#define PORTAL_INTERRUPT_NUM 877
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Your Name");
@@ -33,13 +33,48 @@ void *aligned_kmalloc(size_t size, unsigned int alignment)
 }
 
 static int __init cca_test_init(void) {
-	int ret = request_irq(INTERRUPT_NUMBER, portal_dev_handler,
-			IRQF_SHARED, "portal device management", NULL);
 	
-	if (ret) {
-		pr_err("Failed to register IRQ handler for portal");
-		return ret;
+	// Check if a mapping already exists for the virtual IRQ
+	unsigned int existing_irq = irq_find_mapping(NULL, PORTAL_INTERRUPT_NUM);
+
+	if (existing_irq) {
+		pr_err("A mapping already exists for virtual IRQ %u with usable IRQ %u\n", virtual_irq, existing_irq);
+		return -ENXIO;
 	}
+	
+	//create IRQ mapping 
+	unsigned int irq_num = irq_create_mapping(NULL, PORTAL_INTERRUPT_NUM);
+	if (!irq_num) {
+		pr_err("Failed to create IRQ mapping for virtual IRQ %u\n", PORTAL_INTERRUPT_NUM);
+		return -ENXIO; 
+	}
+
+	//subscribe irq 
+	int ret = request_irq(PORTAL_INTERRUPT_NUM, portal_dev_handler,
+			IRQF_SHARED, "portal device management", NULL);
+	if (ret) {
+		switch (ret) {
+			case -EBUSY:
+				printk(KERN_ERR "IRQ %d is busy\n", PORTAL_INTERRUPT_NUM);
+				break;
+			case -EINVAL:
+				printk(KERN_ERR "Invalid argument for %d\n", PORTAL_INTERRUPT_NUM);
+				break;
+			case -ENOMEM:
+				printk(KERN_ERR "Not enough memory for %d\n", PORTAL_INTERRUPT_NUM);
+				break;
+			default:
+				printk(KERN_ERR "Unknown error for %d\n", PORTAL_INTERRUPT_NUM);
+				break;
+
+			return 0;
+		}		
+	} else {
+		pr_info("IRQ %d is subscribed for %d!!\n", irq_num, PORTAL_INTERRUPT_NUM);
+	}
+
+	//asking host to inject the fault
+	portal_attach_dev(0xdeadbeef);
 
 	pr_info("Interrupt handler registered successfully\n");
 	return 0; // Non-zero return means that the module couldn't be loaded.
