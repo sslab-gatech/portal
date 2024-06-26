@@ -1049,7 +1049,9 @@ static int get_gpi_params(uint64_t base, gpi_info_t *gpi_info,
 int gpt_delegate_pas(uint64_t base, size_t size, unsigned int src_sec_state)
 {
 	gpi_info_t gpi_info;
+#if ENABLE_PORTAL
 	gpi_info_t pgpt_gpi_info;
+#endif 
 	uint64_t nse;
 	int res;
 	unsigned int target_pas;
@@ -1199,7 +1201,10 @@ int gpt_delegate_pas(uint64_t base, size_t size, unsigned int src_sec_state)
  */
 int gpt_undelegate_pas(uint64_t base, size_t size, unsigned int src_sec_state)
 {
-	gpi_info_t gpi_info, pgpt_gpi_info;
+	gpi_info_t gpi_info;
+#if ENABLE_PORTAL
+	gpt_info_t pgpt_gpi_info;
+#endif 
 	uint64_t nse;
 	int res;
 
