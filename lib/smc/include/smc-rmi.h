@@ -118,7 +118,7 @@
 #define RMI_EXIT_RIPAS_CHANGE		U(4)
 #define RMI_EXIT_HOST_CALL		U(5)
 #define RMI_EXIT_SERROR			U(6)
-#define RMI_EXIT_INVOKE_SYSTEM_REALM	U(7)
+#define RMI_EXIT_PORTAL_DEV_MNG		U(7)
 
 /* RmiRttEntryState represents the state of an RTTE */
 #define RMI_UNASSIGNED		U(0)

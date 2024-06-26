@@ -172,6 +172,7 @@ struct rsi_host_call {
 //need to be added to the REALM OS
 #define SMC_RSI_SET_PORTAL		SMC64_RSI_FID(U(0xb))
 #define SMC_RSI_DEV_MNG			SMC64_RSI_FID(U(0xc))
+//TODO{can be merged into RSI_DEV_MNG}
 #define SMC_RSI_ATTACH_DEV		SMC64_RSI_FID(U(0xd))
 
 

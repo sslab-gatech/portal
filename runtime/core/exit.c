@@ -578,11 +578,13 @@ static bool handle_realm_rsi(struct rec *rec, struct rmi_rec_exit *rec_exit)
 		break;
 	 }
 	case SMC_RSI_DEV_MNG: {
-		handle_rsi_device_manage(rec);
+		handle_rsi_device_manage(rec, rec_exit);
+		rec_exit->exit_reason = RMI_EXIT_PORTAL_DEV_MNG;
+		ret_to_rec = false;
 		break;
 	 }
 	case SMC_RSI_ATTACH_DEV: {
-		handle_rsi_attach_device(rec);
+		handle_rsi_attach_device(rec, rec_exit);
 		break;
 	 }
 	default:
@@ -816,6 +818,7 @@ bool handle_realm_exit(struct rec *rec, struct rmi_rec_exit *rec_exit, int excep
 		}
 		return ret;
 	}
+
 	default:
 		INFO("Unrecognized exit reason: %d\n", exception);
 		break;
