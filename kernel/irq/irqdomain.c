@@ -690,6 +690,8 @@ unsigned int irq_create_mapping_affinity(struct irq_domain *domain,
 
 	/* Look for default domain if necessary */
 	if (domain == NULL)
+		pr_info("irq_default_domain(%s) will be used!\n",
+				irq_default_domain->name);
 		domain = irq_default_domain;
 	if (domain == NULL) {
 		WARN(1, "%s(, %lx) called with NULL domain\n", __func__, hwirq);
@@ -1931,4 +1933,7 @@ void __init irq_domain_debugfs_init(struct dentry *root)
 		debugfs_add_domain_dir(d);
 	mutex_unlock(&irq_domain_mutex);
 }
+
+EXPORT_SYMBOL_GPL(all_irq_domains);
+
 #endif

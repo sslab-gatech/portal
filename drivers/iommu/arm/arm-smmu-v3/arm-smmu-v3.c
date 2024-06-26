@@ -3212,6 +3212,7 @@ static void arm_smmu_setup_unique_irqs(struct arm_smmu_device *smmu)
 	/* Request interrupt lines */
 	irq = smmu->evtq.q.irq;
 	if (irq) {
+		pr_info("irq number for eventq actually used : %d\n", irq);
 		ret = devm_request_threaded_irq(smmu->dev, irq, NULL,
 						arm_smmu_evtq_thread,
 						IRQF_ONESHOT,
