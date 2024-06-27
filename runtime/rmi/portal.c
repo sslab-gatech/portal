@@ -28,9 +28,6 @@ unsigned long smc_portal_dev_manage(unsigned long rd_addr,
 			return RMI_ERROR_INPUT;
 	}
 
-
-
-
 	return 0;
 }
 

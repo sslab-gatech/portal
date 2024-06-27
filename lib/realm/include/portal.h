@@ -9,9 +9,9 @@
 //global variable for system realm's rd
 extern unsigned long rd_system_realm_addr;
 
-inline int is_system_realm (unsigned long system_rd_addr)
+inline int is_system_realm (unsigned long rd_addr)
 {
-	return (rd_system_realm_addr == system_rd_addr);
+	return (rd_system_realm_addr == rd_addr);
 }
 
 #if 0
