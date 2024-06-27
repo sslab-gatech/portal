@@ -424,6 +424,12 @@ struct rmi_rec_exit {
 			unsigned long gicv3_misr;	/* 0x388 */
 			/* GICv3 Virtual Machine Control Register */
 			unsigned long gicv3_vmcr;	/* 0x390 */
+
+			/* dirty hack; because entire struct should be page aligned */
+			unsigned long portal_dev_base;
+			unsigned long portal_dev_size;
+			unsigned long portal_dev_target_rec;
+			unsigned long portal_dev_state;
 		   }, 0x300, 0x400);
 	SET_MEMBER_RMI(struct {
 			/* Counter-timer Physical Timer Control Register */
@@ -454,6 +460,7 @@ struct rmi_rec_exit {
 
 	/* PMU counter enable */
 	SET_MEMBER_RMI(unsigned long pmu_cntr_en, 0x710, 0x800); /* 0x710 */
+
 };
 
 /*

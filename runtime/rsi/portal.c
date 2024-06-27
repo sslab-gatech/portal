@@ -37,6 +37,13 @@ unsigned long handle_rsi_device_manage(struct rec *rec, struct rmi_rec_exit *rec
 	if (!dev_node) {
 		dev_info = &(dev_node->dev_info);
 		INFO("Device %s needs to be attached\n", dev_info->dev_name);
+
+		//needs to exit host to invoke system Realm 
+
+		rec_exit->portal_dev_base = dev_info->base;
+		rec_exit->portal_dev_base = dev_info->size;
+
+
 	} else {
 		//no matching device 
 		;

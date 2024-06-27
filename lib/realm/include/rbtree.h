@@ -12,7 +12,7 @@ typedef enum {RED, BLACK} node_color;
 
 typedef struct {
         unsigned long base;
-        size_t size;
+        unsigned long size;
 	enum portal_dev_state state;
 	struct rd *owner; 
         char dev_name[50];
