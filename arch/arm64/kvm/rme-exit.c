@@ -135,6 +135,18 @@ static void update_arch_timer_irq_lines(struct kvm_vcpu *vcpu)
 	kvm_realm_timers_update(vcpu);
 }
 
+
+static int rec_exit_portal(struct kvm_vcpu *vcpu)
+{
+	//inject interrupt 
+	pr_info("Injecting portal event (%d)\n", PORTAL_EVENT);
+	kvm_vgic_inject_irq(vcpu->kvm, vcpu->vcpu_id, PORTAL_EVENT,
+			    0, NULL);
+
+	return 1;
+
+}
+
 /*
  * Return > 0 to return to guest, < 0 on error, 0 (and set exit_reason) on
  * proper exit to userspace.
@@ -188,6 +200,8 @@ int handle_rme_exit(struct kvm_vcpu *vcpu, int rec_run_ret)
 		return rec_exit_host_call(vcpu);
 	/* need to handle RME_EXIT event for portal
 	 */
+	case RMI_EXIT_PORTAL_DEV_MNG:
+		return rec_exit_portal(vcpu);
 	}
 
 	kvm_pr_unimpl("Unsupported exit reason: %u\n",

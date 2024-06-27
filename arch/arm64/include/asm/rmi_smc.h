@@ -209,6 +209,12 @@ struct rec_exit {
 			u64 ripas_base;
 			u64 ripas_size;
 			u64 ripas_value; /* Only lowest bit */
+
+			//dirty hack
+			u64 portal_dev_base;
+			u64 portal_dev_size;
+			u64 portal_dev_target_rec;
+			u64 portal_dev_state; 
 		};
 		u8 padding5[0x100];
 	};
@@ -238,6 +244,7 @@ struct rec_run {
 #define RMI_EXIT_RIPAS_CHANGE		0x04
 #define RMI_EXIT_HOST_CALL		0x05
 #define RMI_EXIT_SERROR			0x06
+#define RMI_EXIT_PORTAL_DEV_MNG		0x07
 
 //TODO move it to portal
 #define SMC_PxI_CALL(func)				\

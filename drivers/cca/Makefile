@@ -1,2 +1,2 @@
-obj-$(CONFIG_CCA_MODULE) += cca_module.o
+obj-y += cca_module.o
 

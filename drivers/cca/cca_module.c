@@ -1,71 +1,94 @@
 #include <linux/init.h>
+#include <linux/platform_device.h>
 #include <linux/module.h>
+#include <linux/interrupt.h>
 #include <linux/kernel.h>
 #include <linux/vmalloc.h>
 
+#include <linux/of.h>
+#include <linux/irq.h>
+#include <linux/irqdesc.h>
+#include <linux/irqdomain.h>
+
 #include <linux/mem_encrypt.h>
+#include <linux/of.h>
+#include <linux/of_irq.h>
+#include <linux/of_device.h>
 #include <linux/set_memory.h>
 #include <asm/rsi.h>
 
+
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Your Name");
-MODULE_DESCRIPTION("A simple example Linux kernel module.");
+MODULE_AUTHOR("Jaehyuk");
+MODULE_DESCRIPTION("Platform device driver for portal");
 MODULE_VERSION("0.1");
 
-void *aligned_kmalloc(size_t size, unsigned int alignment)
+static irqreturn_t portal_dev_handler(int irq, void *dev_id)
 {
-    void *ptr = kmalloc(size + alignment - 1, GFP_KERNEL);
-    if (ptr) {
-        uintptr_t addr = (uintptr_t)ptr + alignment - 1;
-        ptr = (void *)(addr - (addr % alignment));
-    }
-    return ptr;
+	pr_info("Injected interrupt [%d] from KVM for portal", irq);
+	return IRQ_HANDLED;
 }
 
-static int __init hello_init(void) {
-    void *codePage = aligned_kmalloc(4096, 4096);
-    char nop_instruction[4] = {0x1f, 0x20, 0x03, 0xd5}; // ARM64 NOP instruction
-    char ret_instruction[4] = {0xc0, 0x03, 0x5f, 0xd6};
+static int portal_device_probe(struct platform_device *pdev) {
+	
+	// Check if a mapping already exists for the portal IRQ
+	int irq_num; 
+	int ret;
 
-    void (*nop_function)(void) = (void (*)(void))codePage;
-    size_t i = 0;
+	pr_info("%s probing portal device\n",__func__);
 
-    printk(KERN_INFO "Hello, world!\n\n\n\n\n\n\n");
-    printk(KERN_INFO "codePage address: %lx\n", (unsigned long)codePage);
-    
-    // Calculate the number of NOP instructions needed to fill the page
+	//the returned irq_num is kernel irq not hwirq
+	if (!(irq_num = platform_get_irq_byname(pdev, "portal")))
+		pr_info("parsing error, cannot find irq_num for portal\n");
 
-    memcpy((char *)codePage, nop_instruction, sizeof(nop_instruction));
-    memcpy((char *)codePage+sizeof(nop_instruction), ret_instruction, sizeof(ret_instruction));
-    
-    printk("Reading exectuable function first 4 char: ");
-    for (i = 0; i < 8; i++) {
-	    printk("%x ", *((char *)(codePage) + i));
-    }
-    printk("\n");
+	//subscribe irq 
+	ret = request_irq(irq_num, portal_dev_handler,
+			IRQF_ONESHOT, "portal device management", NULL);
+	if (ret) {
+		switch (ret) {
+			case -EBUSY:
+				printk(KERN_ERR "IRQ %d is busy\n", irq_num);
+				break;
+			case -EINVAL:
+				printk(KERN_ERR "Invalid argument for %d\n", irq_num);
+				break;
+			case -ENOMEM:
+				printk(KERN_ERR "Not enough memory for %d\n", irq_num);
+				break;
+			default:
+				printk(KERN_ERR "Unknown error for %d\n", irq_num);
+				break;
 
-    set_memory_portal_executable((unsigned long)codePage, 1);
+			return 0;
+		}		
+	} else {
+		pr_info("IRQ %d is subscribed for portal!\n",irq_num);
+	}
 
-    memcpy((char *)codePage, nop_instruction, sizeof(nop_instruction));
-    memcpy((char *)codePage+sizeof(nop_instruction), ret_instruction, sizeof(ret_instruction));
-    
-    printk("Reading exectuable function first 4 char: ");
-    for (i = 0; i < 8; i++) {
-	    printk("%x ", *((char *)(codePage) + i));
-    }
-    printk("\n");
+	return 0;
 
-    printk("before execution!\n");
-    nop_function();
-    printk("execution passed!\n");
-
-
-    return 0; // Non-zero return means that the module couldn't be loaded.
 }
 
-static void __exit hello_exit(void) {
-    printk(KERN_INFO "Goodbye, world!\n");
+static const struct of_device_id portal_of_device_ids[] = {
+	{.compatible = "arm,portal", .data = (void*) 1},
+	{},
+};
+
+static void portal_driver_unregister(struct platform_driver *drv)
+{
+	platform_driver_unregister(drv);
+	printk(KERN_INFO "Goodbye, portal!\n");
 }
 
-module_init(hello_init);
-module_exit(hello_exit);
+static struct platform_driver portal_driver = {
+	.driver = {
+		.name = "portal",
+		.of_match_table = portal_of_device_ids,
+		.suppress_bind_attrs = true,
+	},
+	.probe = portal_device_probe,
+};
+
+module_driver(portal_driver, platform_driver_register,
+	      portal_driver_unregister)
+
