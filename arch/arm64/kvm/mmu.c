@@ -1216,13 +1216,15 @@ static int realm_map_ipa(struct kvm *kvm, phys_addr_t ipa, unsigned long hva,
 		return -EFAULT;
 
 	if (!realm_is_addr_protected(realm, ipa)) {
-		printk("%s:fault_ipa:%llx mapping to unprotected\n", __func__, ipa);
+		//printk("%s:fault_ipa:%llx mapping to unprotected\n", __func__, ipa);
 		return realm_map_non_secure(realm, ipa, page, map_size,
 					    memcache);
 	}
 
+#if 0
 	 if ((ipa >= 0x50000000 && ipa < 0x50020000) || (ipa >= 0x40000000 && ipa <= 0x4fffffff)) 
 		printk("%s:fault_ipa:%lx (mapping to protected\n", __func__, ipa);
+#endif 
 	return realm_map_protected(realm, hva, ipa, page, map_size, memcache);
 }
 
