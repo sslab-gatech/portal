@@ -34,6 +34,10 @@ obj-$(CONFIG_PNP)		+= pnp/
 obj-y				+= amba/
 
 obj-y				+= clk/
+
+# portal device management driver should be early before initializing devices
+obj-$(CONFIG_CCA_MODULE)	+= cca/
+
 # Many drivers will want to use DMA so this has to be made available
 # really early.
 obj-$(CONFIG_DMADEVICES)	+= dma/
@@ -58,6 +62,7 @@ obj-y				+= char/
 
 # iommu/ comes before gpu as gpu are using iommu controllers
 obj-y				+= iommu/
+
 
 # gpu/ comes after char for AGP vs DRM startup and after iommu
 obj-y				+= gpu/
@@ -190,5 +195,3 @@ obj-$(CONFIG_MOST)		+= most/
 obj-$(CONFIG_PECI)		+= peci/
 obj-$(CONFIG_HTE)		+= hte/
 
-# For CCA testing
-obj-$(CONFIG_CCA_MODULE)	+= cca/
