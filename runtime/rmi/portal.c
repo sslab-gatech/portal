@@ -23,69 +23,6 @@ unsigned long smc_portal_dev_manage(unsigned long rd_addr,
 
 	switch ((enum portal_dev_mng_cmd)cmd) {
 		case DEV_ATTACH: 
-			/* Only system realm can occupy SMMU device */
-			if (is_smmu(dev_addr) && !is_system_realm(rd_addr)) {
-				return RMI_ERROR_REALM;
-			}	
-			switch (dev_node->dev_info.state) {
-				/* Request device to host */
-				case DEV_EMPTY:
-					dev_node->dev_info.state = DEV_OCCUPIED;
-					/* Exit to hose kernel to delegate device */
-					break;
-			    	/* Currently just grab the device from other realm.
-			    	 * In the future it needs internal scheduler to 
-			    	 * decide whether the device should be attached
-			    	 */
-				case DEV_OCCUPIED:
-					dev_node->dev_info.state = DEV_IN_TRANSIT;
-					/* Exit to device owner  */
-
-					break;
-
-			      	/* cannot occupy the device in-transit */
-				case DEV_IN_TRANSIT:
-					return RMI_ERROR_IN_USE;
-
-				default:
-					return RMI_ERROR_INPUT;
-			}
-			break;
-
-		case DEV_DETACH:
-			switch (dev_node->dev_info.state) {
-				case DEV_IN_TRANSIT:
-					/* Destroy device mapping in s2tt */
-
-					/* Exit to system REALM */
-					dev_node->dev_info.state = DEV_DETACHED;
-					break;
-
-				/* all other cases are error */
-				default:
-					return RMI_ERROR_INPUT;
-					break;
-			}
-			break;
-
-		case DEV_OCCUPY: 
-			/* Occupy cmd can be only be issued from system realm.
-			 * After the SMMU setting is done, it can finally be 
-			 * assigned to the realm 
-			 */
-
-			if (!is_system_realm(rd_addr))
-				return RMI_ERROR_REALM;
-			switch (dev_node->dev_info.state) {
-				case DEV_DETACHED:
-					/* Establish device mapping in s2tt  */
-
-					dev_node->dev_info.state = DEV_OCCUPIED;
-					break;
-				default:
-					return RMI_ERROR_INPUT;
-			}
-			break;
 
 		default:
 			return RMI_ERROR_INPUT;
