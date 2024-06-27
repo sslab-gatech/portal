@@ -214,7 +214,7 @@ struct rec_exit {
 			u64 portal_dev_base;
 			u64 portal_dev_size;
 			u64 portal_dev_target_rec;
-			u64 portal_dev_state; 
+			u64 portal_dev_flag; 
 		};
 		u8 padding5[0x100];
 	};
