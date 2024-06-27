@@ -26,6 +26,11 @@ MODULE_VERSION("0.1");
 static irqreturn_t portal_dev_handler(int irq, void *dev_id)
 {
 	pr_info("Injected interrupt [%d] from KVM for portal", irq);
+
+	//TODO{Device should be properly detached}
+
+	//notify RMM the device has been detached from the realm
+	portal_detach_dev(0xdeadbeef);
 	return IRQ_HANDLED;
 }
 
@@ -65,6 +70,9 @@ static int portal_device_probe(struct platform_device *pdev) {
 		pr_info("IRQ %d is subscribed for portal!\n",irq_num);
 	}
 
+
+	//for testing
+	portal_attach_dev(0xdeadbeef);
 	return 0;
 
 }
