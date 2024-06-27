@@ -429,7 +429,7 @@ struct rmi_rec_exit {
 			unsigned long portal_dev_base;
 			unsigned long portal_dev_size;
 			unsigned long portal_dev_target_rec;
-			unsigned long portal_dev_state;
+			unsigned long portal_dev_flag;
 		   }, 0x300, 0x400);
 	SET_MEMBER_RMI(struct {
 			/* Counter-timer Physical Timer Control Register */

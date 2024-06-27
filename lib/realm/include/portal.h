@@ -31,16 +31,20 @@ enum portal_event {
 };
 
 enum portal_dev_state {
-	DEV_EMPTY,
-	DEV_OCCUPIED,
-	DEV_IN_TRANSIT,
-	DEV_DETACHED
-	
+	DEV_EMPTY, //device has not been delegated to Realm world
+	DEV_OCCUPIED, //device is currently occupied by Realm
+	DEV_IN_TRANSIT, 
+	DEV_DETACHED // device is detached from realm, but SMMU mapping exist 
 };
 
 enum portal_dev_mng_cmd {
 	DEV_ATTACH,
 	DEV_DETACH,
-	DEV_OCCUPY
+	DEV_SMMU_MAPPED
+};
+
+enum portal_dev_mng_host_cmd {
+	DEV_DELEGATE,
+	DEV_INVOKE_REALM
 };
 #endif /* PORTAL_H */

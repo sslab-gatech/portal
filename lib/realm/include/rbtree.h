@@ -14,7 +14,8 @@ typedef struct {
         unsigned long base;
         unsigned long size;
 	enum portal_dev_state state;
-	struct rd *owner; 
+	enum portal_dev_state prev_state;
+	unsigned long owner_rd_addr; 
         char dev_name[50];
 } device_info;
 

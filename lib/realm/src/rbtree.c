@@ -105,7 +105,8 @@ rb_node *create_node (rb_tree *tree, device_info dev_info) {
 	node->dev_info.base = dev_info.base;
 	node->dev_info.size = dev_info.size;
 	node->dev_info.state = dev_info.state;
-	node->dev_info.owner = dev_info.owner; 
+	node->dev_info.prev_state = dev_info.prev_state;
+	node->dev_info.owner_rd_addr = dev_info.owner_rd_addr; 
 
 	strlcpy(node->dev_info.dev_name, dev_info.dev_name,
 		sizeof(node->dev_info.dev_name));
