@@ -35,8 +35,6 @@ obj-y				+= amba/
 
 obj-y				+= clk/
 
-# portal device management driver should be early before initializing devices
-obj-$(CONFIG_CCA_MODULE)	+= cca/
 
 # Many drivers will want to use DMA so this has to be made available
 # really early.
@@ -59,6 +57,9 @@ obj-$(CONFIG_RESET_CONTROLLER)	+= reset/
 # default.
 obj-y				+= tty/
 obj-y				+= char/
+
+# portal device management driver should be early before initializing devices
+# obj-$(CONFIG_CCA_MODULE)	+= cca/
 
 # iommu/ comes before gpu as gpu are using iommu controllers
 obj-y				+= iommu/
