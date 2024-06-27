@@ -113,7 +113,7 @@ static bool dma_go_direct(struct device *dev, dma_addr_t mask,
 		const struct dma_map_ops *ops)
 {
 	if (likely(!ops)) {
-		dev_info(dev, "no ops for this dev!\n");
+		//dev_info(dev, "no ops for this dev!\n");
 		return true;
 	}
 #ifdef CONFIG_DMA_OPS_BYPASS

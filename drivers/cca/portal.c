@@ -16,6 +16,7 @@
 #include <linux/of_device.h>
 #include <linux/set_memory.h>
 #include <asm/rsi.h>
+#include "portal.h"
 
 
 MODULE_LICENSE("GPL");
@@ -85,6 +86,7 @@ static const struct of_device_id portal_of_device_ids[] = {
 static void portal_driver_unregister(struct platform_driver *drv)
 {
 	platform_driver_unregister(drv);
+	//TODO{detach all devices before unloading}
 	printk(KERN_INFO "Goodbye, portal!\n");
 }
 
