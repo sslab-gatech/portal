@@ -18,8 +18,6 @@
 #include <asm/rsi.h>
 
 
-#define PORTAL_INTERRUPT_NUM 877
-
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Jaehyuk");
 MODULE_DESCRIPTION("Platform device driver for portal");
@@ -31,80 +29,41 @@ static irqreturn_t portal_dev_handler(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-#if 0
-void *aligned_kmalloc(size_t size, unsigned int alignment)
-{
-    void *ptr = kmalloc(size + alignment - 1, GFP_KERNEL);
-    if (ptr) {
-        uintptr_t addr = (uintptr_t)ptr + alignment - 1;
-        ptr = (void *)(addr - (addr % alignment));
-    }
-    return ptr;
-}
-#endif 
-
 static int portal_device_probe(struct platform_device *pdev) {
 	
 	// Check if a mapping already exists for the portal IRQ
-	unsigned int irq_num; 
-	unsigned int existing_irq;
+	int irq_num; 
 	int ret;
 
 	pr_info("%s probing portal device\n",__func__);
 
-	irq_num = platform_get_irq_byname(pdev, "portal");
-	if (irq_num > 0)
-		pr_info("irq_num from fdt:%d\n", irq_num);
-	else 
+	//the returned irq_num is kernel irq not hwirq
+	if (!(irq_num = platform_get_irq_byname(pdev, "portal")))
 		pr_info("parsing error, cannot find irq_num for portal\n");
 
-	return 0;
-
-	existing_irq = irq_find_mapping(NULL, PORTAL_INTERRUPT_NUM);
-	irq_num = (unsigned long)irq_of_parse_and_map(pdev->dev.of_node, 1);
-	pr_info("Parsed and mapped irq_num from fdt:%d\n", irq_num);
-
-	if (existing_irq) {
-		pr_err("A mapping already exists for virtual IRQ %u with usable IRQ %u\n", 
-				PORTAL_INTERRUPT_NUM, existing_irq);
-		return -ENXIO;
-	}
-	
-	//create IRQ mapping 
-	irq_num = irq_create_mapping(NULL, PORTAL_INTERRUPT_NUM);
-	if (!irq_num) {
-		pr_err("Failed to create IRQ mapping for portal IRQ %u\n", PORTAL_INTERRUPT_NUM);
-		return -ENXIO; 
-	}
-
 	//subscribe irq 
-	ret = request_irq(PORTAL_INTERRUPT_NUM, portal_dev_handler,
-			IRQF_SHARED, "portal device management", NULL);
+	ret = request_irq(irq_num, portal_dev_handler,
+			IRQF_ONESHOT, "portal device management", NULL);
 	if (ret) {
 		switch (ret) {
 			case -EBUSY:
-				printk(KERN_ERR "IRQ %d is busy\n", PORTAL_INTERRUPT_NUM);
+				printk(KERN_ERR "IRQ %d is busy\n", irq_num);
 				break;
 			case -EINVAL:
-				printk(KERN_ERR "Invalid argument for %d\n", PORTAL_INTERRUPT_NUM);
+				printk(KERN_ERR "Invalid argument for %d\n", irq_num);
 				break;
 			case -ENOMEM:
-				printk(KERN_ERR "Not enough memory for %d\n", PORTAL_INTERRUPT_NUM);
+				printk(KERN_ERR "Not enough memory for %d\n", irq_num);
 				break;
 			default:
-				printk(KERN_ERR "Unknown error for %d\n", PORTAL_INTERRUPT_NUM);
+				printk(KERN_ERR "Unknown error for %d\n", irq_num);
 				break;
 
 			return 0;
 		}		
 	} else {
-		pr_info("IRQ %d is subscribed for %d!!\n", irq_num, PORTAL_INTERRUPT_NUM);
+		pr_info("IRQ %d is subscribed for portal!\n",irq_num);
 	}
-
-	//asking host to inject the fault
-	portal_attach_dev(0xdeadbeef);
-
-	pr_info("Interrupt handler registered successfully\n");
 
 	return 0;
 
@@ -130,8 +89,6 @@ static struct platform_driver portal_driver = {
 	.probe = portal_device_probe,
 };
 
-#if 0
 module_driver(portal_driver, platform_driver_register,
 	      portal_driver_unregister)
 
-#endif 

@@ -90,12 +90,13 @@ static inline unsigned long rsi_set_portal(unsigned long XX)
 	return res.a0;
 }
 
-static inline unsigned long rsi_device_management(unsigned long XX)
+static inline unsigned long rsi_device_management(unsigned long addr, 
+						  unsigned long cmd)
 {
 	struct arm_smccc_res res;
 
 	invoke_rsi_fn_smc_with_res(SMC_RSI_DEV_MNG,
-				   XX, 0, 0, 0, &res);
+				   addr, cmd, 0, 0, &res);
 
 	return res.a0;
 }
