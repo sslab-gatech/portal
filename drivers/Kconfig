@@ -241,6 +241,6 @@ source "drivers/peci/Kconfig"
 
 source "drivers/hte/Kconfig"
 
-source "drivers/cca/Kconfig"
+source "drivers/portal/Kconfig"
 endmenu
 

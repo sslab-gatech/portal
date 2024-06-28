@@ -195,4 +195,4 @@ obj-$(CONFIG_PECI)		+= peci/
 obj-$(CONFIG_HTE)		+= hte/
 
 # portal device management driver should be early before initializing devices
-obj-$(CONFIG_CCA_MODULE)	+= cca/
+obj-$(CONFIG_CCA_PORTAL)	+= portal/
