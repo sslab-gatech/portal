@@ -41,7 +41,7 @@ static int portal_device_probe(struct platform_device *pdev) {
 	int irq_num; 
 	int ret;
 
-	pr_info("%s probing portal device\n",__func__);
+	pr_info("[%s] virtual device for portal is found\n",__func__);
 
 	//the returned irq_num is kernel irq not hwirq
 	if (!(irq_num = platform_get_irq_byname(pdev, "portal")))
@@ -68,9 +68,8 @@ static int portal_device_probe(struct platform_device *pdev) {
 			return 0;
 		}		
 	} else {
-		pr_info("IRQ %d is subscribed for portal!\n",irq_num);
+		pr_info("IRQ %d is subscribed for portal!\n", irq_num);
 	}
-
 
 	//for testing
 	portal_attach_dev(0xdeadbeef);
