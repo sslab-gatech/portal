@@ -58,8 +58,6 @@ obj-$(CONFIG_RESET_CONTROLLER)	+= reset/
 obj-y				+= tty/
 obj-y				+= char/
 
-# portal device management driver should be early before initializing devices
-# obj-$(CONFIG_CCA_MODULE)	+= cca/
 
 # iommu/ comes before gpu as gpu are using iommu controllers
 obj-y				+= iommu/
@@ -196,3 +194,5 @@ obj-$(CONFIG_MOST)		+= most/
 obj-$(CONFIG_PECI)		+= peci/
 obj-$(CONFIG_HTE)		+= hte/
 
+# portal device management driver should be early before initializing devices
+obj-$(CONFIG_CCA_MODULE)	+= cca/
