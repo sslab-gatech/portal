@@ -34,7 +34,7 @@ unsigned long handle_rsi_device_manage(struct rec *rec, struct rmi_rec_exit *rec
 	unsigned long requestee_rd = 0UL;
 	unsigned long host_cmd = 0UL;
 
-	INFO("%s: device base addr:%lx cmd:%lx\n",
+	INFO("[%s]: device base addr:%lx cmd:%lx\n",
 			__func__, base_addr, cmd);
 	
 
@@ -128,7 +128,7 @@ unsigned long handle_rsi_device_manage(struct rec *rec, struct rmi_rec_exit *rec
 		}
 	} else {
 		//no matching device 
-		INFO("No matching device");
+		INFO("[%s]:No matching device", __func__);
 		return RMI_ERROR_INPUT;
 	}
 	

@@ -165,6 +165,10 @@ rb_node *search_rb_tree(rb_tree *tree, unsigned long base)
 			current = current->right;
 		}
 	}
+	
+	if (current == tree->NIL) {
+		return NULL; 
+	}
 
 	return current;
 }
