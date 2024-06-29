@@ -455,8 +455,10 @@ int kvm_vgic_inject_irq(struct kvm *kvm, int cpuid, unsigned int intid,
 		return -EINVAL;
 
 	irq = vgic_get_irq(kvm, vcpu, intid);
-	if (!irq)
+	if (!irq) {
+		pr_info("irq does not exist for %d\n", intid);
 		return -EINVAL;
+	}
 
 	raw_spin_lock_irqsave(&irq->irq_lock, flags);
 

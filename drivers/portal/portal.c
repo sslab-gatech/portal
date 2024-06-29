@@ -16,6 +16,7 @@
 #include <linux/of_device.h>
 #include <linux/set_memory.h>
 #include <asm/rsi.h>
+#include "portal.h"
 
 
 MODULE_LICENSE("GPL");
@@ -25,7 +26,8 @@ MODULE_VERSION("0.1");
 
 static irqreturn_t portal_dev_handler(int irq, void *dev_id)
 {
-	pr_info("Injected interrupt [%d] from KVM for portal", irq);
+	pr_info("Portal interrupt! %d", irq);
+
 	return IRQ_HANDLED;
 }
 
@@ -35,7 +37,7 @@ static int portal_device_probe(struct platform_device *pdev) {
 	int irq_num; 
 	int ret;
 
-	pr_info("%s probing portal device\n",__func__);
+	pr_info("[%s] virtual device for portal is found\n",__func__);
 
 	//the returned irq_num is kernel irq not hwirq
 	if (!(irq_num = platform_get_irq_byname(pdev, "portal")))
@@ -62,7 +64,7 @@ static int portal_device_probe(struct platform_device *pdev) {
 			return 0;
 		}		
 	} else {
-		pr_info("IRQ %d is subscribed for portal!\n",irq_num);
+		pr_info("IRQ %d is subscribed for portal!\n", irq_num);
 	}
 
 	return 0;
@@ -77,6 +79,7 @@ static const struct of_device_id portal_of_device_ids[] = {
 static void portal_driver_unregister(struct platform_driver *drv)
 {
 	platform_driver_unregister(drv);
+	//TODO{detach all devices before unloading}
 	printk(KERN_INFO "Goodbye, portal!\n");
 }
 

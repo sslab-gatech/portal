@@ -267,6 +267,14 @@
 		};
 	};
 
+        portal {
+                compatible = "arm,portal";
+                interrupts = <GIC_SPI 200 IRQ_TYPE_EDGE_RISING>;
+                interrupt-names = "portal";
+        };
+        
+
+
 	bus@8000000 {
 		#interrupt-cells = <1>;
 		interrupt-map-mask = <0 0 63>;

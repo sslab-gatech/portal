@@ -95,5 +95,5 @@ static inline bool realm_is_addr_protected(struct realm *realm,
 	return !(addr & ~(BIT(ia_bits - 1) - 1));
 }
 
-#define PORTAL_EVENT 219
+#define PORTAL_EVENT 230
 #endif

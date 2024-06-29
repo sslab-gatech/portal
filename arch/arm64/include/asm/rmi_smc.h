@@ -210,10 +210,10 @@ struct rec_exit {
 			u64 ripas_size;
 			u64 ripas_value; /* Only lowest bit */
 
-			//dirty hack
+			/* Portal related variables */
 			u64 portal_dev_base;
 			u64 portal_dev_size;
-			u64 portal_dev_target_rec;
+			u64 portal_dev_target_rd;
 			u64 portal_dev_flag; 
 		};
 		u8 padding5[0x100];

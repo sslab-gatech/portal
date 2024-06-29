@@ -136,10 +136,20 @@ static void update_arch_timer_irq_lines(struct kvm_vcpu *vcpu)
 }
 
 
-static int rec_exit_portal(struct kvm_vcpu *vcpu)
+static int rec_exit_portal_dev_mng(struct kvm_vcpu *vcpu)
 {
+	struct rec *rec = &vcpu->arch.rec;
+	unsigned long dev_base = rec->run->exit.portal_dev_base;
+	unsigned long dev_size = rec->run->exit.portal_dev_size;
+	unsigned long dev_target_rd = rec->run->exit.portal_dev_target_rd;
+	unsigned long dev_flag = rec->run->exit.portal_dev_flag; 
+
+	pr_info("[HOST:%s]: Portal device management requested from REALM!\n        \
+		 base:%lx    size:%lx   target_rec_addr:%lx   dev_flag:%lx\n", 
+		 __func__, dev_base, dev_size, dev_target_rd, dev_flag);
+	
 	//inject interrupt 
-	pr_info("Injecting portal event (%d)\n", PORTAL_EVENT);
+	pr_info("[HOST:%s]: Injecting portal event (%d)\n", __func__, PORTAL_EVENT);
 	kvm_vgic_inject_irq(vcpu->kvm, vcpu->vcpu_id, PORTAL_EVENT,
 			    0, NULL);
 
@@ -201,7 +211,7 @@ int handle_rme_exit(struct kvm_vcpu *vcpu, int rec_run_ret)
 	/* need to handle RME_EXIT event for portal
 	 */
 	case RMI_EXIT_PORTAL_DEV_MNG:
-		return rec_exit_portal(vcpu);
+		return rec_exit_portal_dev_mng(vcpu);
 	}
 
 	kvm_pr_unimpl("Unsupported exit reason: %u\n",

@@ -190,5 +190,5 @@ obj-$(CONFIG_MOST)		+= most/
 obj-$(CONFIG_PECI)		+= peci/
 obj-$(CONFIG_HTE)		+= hte/
 
-# For CCA testing
-#obj-y			        += cca/
+# For portal
+obj-y			        += portal/
