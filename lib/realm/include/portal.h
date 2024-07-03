@@ -24,7 +24,7 @@ enum portal_event {
 	CMD_Q_ATTACH_INT = 0x1,	
 	DEV_ATTACH_INT,
 	DEV_DETACH_INT,
-	PORTAL_EVENT_COUNT = DEV_DETACH_INT,
+	PORTAL_EVENT_COUNT,
 };
 
 enum portal_dev_state {
