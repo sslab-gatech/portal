@@ -26,6 +26,7 @@
 unsigned long rd_system_realm_addr;
 rb_tree rb_dev_tree; 
 unsigned long smmu_addr;
+unsigned int portal_interrupts[PORTAL_EVENT_COUNT];
 
 static void rmm_arch_init(void)
 {
@@ -48,12 +49,19 @@ void translate_dev_info_to_rb(rb_tree *rb_dev) {
 void rmm_warmboot_main(void)
 {
 	init_rb_tree(&rb_dev_tree);
-	/* need to initialize device lists  */
+	/* Need to initialize device lists  */
 	//XXX{TF-a should pass device tree lists}
 	translate_dev_info_to_rb(&rb_dev_tree);
 
-	/* init system realm address as 0x0 */
+	/* Init system realm address as 0x0 */
 	rd_system_realm_addr = 0x0; 
+
+	/* Virtual portal device for interrupt */
+	//XXX{Information should be passed from TF-a in fdt
+	portal_interrupts[CMD_Q_ATTACH_INT] =	PORTAL_INTERRUPT;
+	portal_interrupts[DEV_ATTACH_INT] = 	PORTAL_INTERRUPT+1;
+	portal_interrupts[DEV_DETACH_INT] =	PORTAL_INTERRUPT+2;
+
 	/*
 	 * Do the rest of RMM architecture init
 	 */

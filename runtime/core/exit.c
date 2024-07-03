@@ -578,8 +578,9 @@ static bool handle_realm_rsi(struct rec *rec, struct rmi_rec_exit *rec_exit)
 		break;
 	 }
 	case SMC_RSI_DEV_MNG: {
-		handle_rsi_device_manage(rec, rec_exit);
+		handle_rsi_portal_dev_mng(rec, rec_exit);
 		rec_exit->exit_reason = RMI_EXIT_PORTAL_DEV_MNG;
+		/* exit to host to invoke other realm(s) */
 		ret_to_rec = false;
 		break;
 	 }

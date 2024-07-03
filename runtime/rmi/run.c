@@ -80,26 +80,6 @@ static void complete_set_ripas(struct rec *rec)
 	}
 }
 
-static bool complete_portal_management(struct rd *rd, struct rec *rec)
-{
-	enum portal_event event  = rd->portal_event;
-
-	if (event >= CMD_Q_ATTACH_INT && 
-			event < PORTAL_EVENT_COUNT)
-	{
-		switch (event) {
-			case CMD_Q_ATTACH_INT:
-				break;
-			case DEV_ATTACH_INT:
-				break;
-			case DEV_DETACH_INT:
-				break;
-			default:
-				return false;
-		}
-	} 
-	return true; 
-}
 
 static bool complete_sea_insertion(struct rec *rec, struct rmi_rec_entry *rec_entry)
 {
@@ -269,19 +249,17 @@ unsigned long smc_rec_enter(unsigned long rec_addr,
 	 * anything which may have side effects.
 	 */
 	gic_copy_state_from_ns(&rec->sysregs.gicstate, &rec_run.entry);
-	if (!gic_validate_state(&rec->sysregs.gicstate)) {
-		ret = RMI_ERROR_REC;
-		goto out_unmap_buffers;
-	}
-
 #if ENABLE_PORTAL
-	/* XXX{What happens if portal and sea instruction events are 
-	 * set at the same time? */
-	if (!complete_portal_management(rd, rec)) {
+	if (!gic_verify_portal_interrupt(&rec->sysregs.gicstate, rd->portal_event))
+	{
 		ret = RMI_ERROR_REC;
 		goto out_unmap_buffers;
 	}
 #endif 
+	if (!gic_validate_state(&rec->sysregs.gicstate)) {
+		ret = RMI_ERROR_REC;
+		goto out_unmap_buffers;
+	}
 
 	if (!complete_mmio_emulation(rec, &rec_run.entry)) {
 		ret = RMI_ERROR_REC;

@@ -425,11 +425,6 @@ struct rmi_rec_exit {
 			/* GICv3 Virtual Machine Control Register */
 			unsigned long gicv3_vmcr;	/* 0x390 */
 
-			/* dirty hack; because entire struct should be page aligned */
-			unsigned long portal_dev_base;
-			unsigned long portal_dev_size;
-			unsigned long portal_dev_target_rec;
-			unsigned long portal_dev_flag;
 		   }, 0x300, 0x400);
 	SET_MEMBER_RMI(struct {
 			/* Counter-timer Physical Timer Control Register */
@@ -448,6 +443,12 @@ struct rmi_rec_exit {
 			unsigned long ripas_size;	/* 0x508 */
 			/* RIPAS value of pending RIPAS change */
 			unsigned char ripas_value;	/* 0x510 */
+
+			/* portal related variables passed to host */
+			unsigned long portal_dev_base;		/* 0x518 */
+			unsigned long portal_dev_size;		/* 0x520 */
+			unsigned long portal_dev_target_rd;	/* 0x528 */	
+			unsigned long portal_dev_flag;		/* 0x530 */
 		   }, 0x500, 0x600);
 	/* Host call immediate value */
 	SET_MEMBER_RMI(unsigned int imm, 0x600, 0x700);	/* 0x600 */

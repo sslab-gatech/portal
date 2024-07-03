@@ -10,6 +10,7 @@
 #include <smc-rmi.h>
 #include <stdbool.h>
 #include <string.h>
+#include <portal.h>
 
 /* The macros below fall through to case (n - 1) */
 #define READ_ICH_LR_EL2(n)	{				\
@@ -184,6 +185,11 @@ bool gic_validate_state(struct gic_cpu_state *gicstate)
 		unsigned long lr = gicstate->ich_lr_el2[i];
 		unsigned long intid = EXTRACT(ICH_LR_VINTID, lr);
 
+		if (intid != 0) {
+			INFO("[%s]: interrupt %ld injected from host\n",
+					__func__, intid);
+		}
+
 		if ((lr & ICH_LR_STATE_MASK) == ICH_LR_STATE_INVALID) {
 			continue;
 		}
@@ -219,6 +225,32 @@ bool gic_validate_state(struct gic_cpu_state *gicstate)
 	}
 
 	return true;
+}
+
+bool gic_verify_portal_interrupt(struct gic_cpu_state *gicstate, enum portal_event event)
+{
+        unsigned int i;
+
+        /* Prevent host from injecting unauthorized interrupt */
+        for (i = 0U; i <= gic_virt_feature.nr_lrs; i++) {
+                unsigned long lr = gicstate->ich_lr_el2[i];
+                unsigned long intid = EXTRACT(ICH_LR_VINTID, lr);
+
+                switch (intid) {
+                        case CMD_Q_ATTACH_INT:
+                                break;
+                        case DEV_ATTACH_INT:
+				/* inject interrupt testing */
+				
+
+
+                                break;
+                        case DEV_DETACH_INT:
+                                break;
+                        default:
+                                break;
+                }
+        }
 }
 
 /* Save ICH_LR<n>_EL2 registers [n...0] */

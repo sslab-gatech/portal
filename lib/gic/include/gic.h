@@ -8,6 +8,7 @@
 
 #include <stdbool.h>
 #include <utils_def.h>
+#include <portal.h>
 
 /* The number of implemented List registers, minus one */
 #define ICH_VTR_EL2_LIST_REGS_SHIFT	UL(0)
@@ -240,5 +241,9 @@ void gic_copy_state_to_ns(struct gic_cpu_state *gicstate,
 bool gic_validate_state(struct gic_cpu_state *gicstate);
 void gic_restore_state(struct gic_cpu_state *gicstate);
 void gic_save_state(struct gic_cpu_state *gicstate);
+
+
+bool gic_verify_portal_interrupt(struct gic_cpu_state *gicstate, 
+					enum portal_event event);
 
 #endif /* GIC_H */

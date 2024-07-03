@@ -22,7 +22,7 @@ unsigned long handle_rsi_set_portal(struct rec *rec)
 }
 
 
-unsigned long handle_rsi_device_manage(struct rec *rec, struct rmi_rec_exit *rec_exit)
+unsigned long handle_rsi_portal_dev_mng(struct rec *rec, struct rmi_rec_exit *rec_exit)
 {
 	//lookup device lists 
 	rb_node *dev_node = NULL;
@@ -34,17 +34,30 @@ unsigned long handle_rsi_device_manage(struct rec *rec, struct rmi_rec_exit *rec
 	unsigned long requestee_rd = 0UL;
 	unsigned long host_cmd = 0UL;
 
-	INFO("[%s]: device base addr:%lx cmd:%lx\n",
-			__func__, base_addr, cmd);
-	
+	/* for device testing temporarily generate device info */
+	static int init = 0;
+	if (init == 0) {
+		init = 1;
+		device_info test_dev = {.base=0xdeadbeef, .size =0x1000, .state=DEV_EMPTY,
+					.prev_state=DEV_EMPTY, .owner_rd_addr = requester_rd,
+					.dev_name="PortalTestingDev"}; 
+		rb_insert(&rb_dev_tree, test_dev);
+		rd_system_realm_addr = requester_rd; 
+	}
+	/* end of test code */
 
+	INFO("[RMM:%s]Requester RD:%lx\n", __func__,requester_rd);
+	
 	dev_node = search_rb_tree(&rb_dev_tree, base_addr);
 	if (dev_node) {
 		dev_info = &(dev_node->dev_info);
+		INFO("[RMM:%s]: device found on the rmm dev list! base addr:%lx, state:%x cmd:%lx\n",
+				__func__, dev_info->base, dev_info->state, cmd);
 		switch ((enum portal_dev_mng_cmd)cmd) {
 			case DEV_ATTACH:
 				/* Only system realm can occupy SMMU device */
 				if (is_smmu(base_addr) && !is_system_realm(requester_rd)) {
+					ERROR("Only system Realm can occupy SMMU device");
 					return RMI_ERROR_REALM;
 				}               
 				switch (dev_info->state) {
@@ -128,15 +141,18 @@ unsigned long handle_rsi_device_manage(struct rec *rec, struct rmi_rec_exit *rec
 		}
 	} else {
 		//no matching device 
-		INFO("[%s]:No matching device", __func__);
+		INFO("[RMM:%s]:No matching device", __func__);
 		return RMI_ERROR_INPUT;
 	}
 	
 exit_to_host:
 	//needs to exit host to invoke system Realm 
+	INFO("[RMM]:Exiting to host!\n");
+	INFO("[RMM]:Base: %lx, size: %lx, target_rd: %lx, flag:%lx\n",
+		dev_info->base, dev_info->size, requestee_rd, host_cmd);
 	rec_exit->portal_dev_base = dev_info->base;
 	rec_exit->portal_dev_size = dev_info->size;
-	rec_exit->portal_dev_target_rec = requestee_rd;
+	rec_exit->portal_dev_target_rd = requestee_rd;
 	rec_exit->portal_dev_flag = host_cmd;
 	return 0;
 }

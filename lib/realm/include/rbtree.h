@@ -45,10 +45,4 @@ void init_rb_tree(rb_tree *tree);
 rb_node *search_rb_tree(rb_tree *tree, unsigned long base);
 
 extern rb_tree rb_dev_tree; 
-extern unsigned long smmu_addr;
-
-inline int is_smmu(unsigned long dev_addr) 
-{
-	return (dev_addr == smmu_addr);
-}
 #endif 
