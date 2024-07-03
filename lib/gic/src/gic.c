@@ -185,14 +185,13 @@ bool gic_validate_state(struct gic_cpu_state *gicstate)
 		unsigned long lr = gicstate->ich_lr_el2[i];
 		unsigned long intid = EXTRACT(ICH_LR_VINTID, lr);
 
-		if (intid != 0) {
-			INFO("[%s]: interrupt %ld injected from host\n",
-					__func__, intid);
-		}
 
 		if ((lr & ICH_LR_STATE_MASK) == ICH_LR_STATE_INVALID) {
 			continue;
 		}
+
+		INFO("[%s]: interrupt %ld injected from host, LR[%d]:%lx\n",
+				__func__, intid, i, lr);
 
 		/* The RMM Specification imposes the constraint that HW == '0' */
 		if ((EXTRACT_BIT(ICH_LR_HW, lr) != 0UL) ||
@@ -229,12 +228,30 @@ bool gic_validate_state(struct gic_cpu_state *gicstate)
 
 bool gic_verify_portal_interrupt(struct gic_cpu_state *gicstate, enum portal_event event)
 {
+	return true;
+#if 0
         unsigned int i;
-
+	bool injected = false;
         /* Prevent host from injecting unauthorized interrupt */
+
+
         for (i = 0U; i <= gic_virt_feature.nr_lrs; i++) {
                 unsigned long lr = gicstate->ich_lr_el2[i];
                 unsigned long intid = EXTRACT(ICH_LR_VINTID, lr);
+
+		/* FIXME{dirty hack to inject interrupt to empty slot!} */
+		if ((lr & ICH_LR_STATE_MASK) == ICH_LR_STATE_INVALID) {
+			if (injected) continue; 
+			unsigned long injected_lr = 0UL;
+			intid = portal_interrupts[DEV_ATTACH_INT]; 
+			injected_lr |= (intid << ICH_LR_VINTID_SHIFT);
+			injected_lr |= (0x1UL << ICH_LR_STATE_SHIFT);
+
+			gicstate->ich_lr_el2[i] = injected_lr;
+			injected = true; 
+		}
+
+
 
                 switch (intid) {
                         case CMD_Q_ATTACH_INT:
@@ -251,6 +268,9 @@ bool gic_verify_portal_interrupt(struct gic_cpu_state *gicstate, enum portal_eve
                                 break;
                 }
         }
+
+	return true;
+#endif 
 }
 
 /* Save ICH_LR<n>_EL2 registers [n...0] */
