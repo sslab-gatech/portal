@@ -100,6 +100,7 @@ struct vgic_irq *vgic_get_irq(struct kvm *kvm, struct kvm_vcpu *vcpu,
 
 	/* SPIs */
 	if (intid < (kvm->arch.vgic.nr_spis + VGIC_NR_PRIVATE_IRQS)) {
+		pr_info("[HOST]: Shared IRQ %d should be retrieved from spis!\n", intid);
 		intid = array_index_nospec(intid, kvm->arch.vgic.nr_spis + VGIC_NR_PRIVATE_IRQS);
 		return &kvm->arch.vgic.spis[intid - VGIC_NR_PRIVATE_IRQS];
 	}
@@ -458,11 +459,15 @@ int kvm_vgic_inject_irq(struct kvm *kvm, int cpuid, unsigned int intid,
 	if (!irq) {
 		pr_info("irq does not exist for %d\n", intid);
 		return -EINVAL;
+	} else {
+		if(intid != 27)
+			pr_info("irq %d requested and actual hwirq is : %d\n", intid, irq->hwintid);
 	}
 
 	raw_spin_lock_irqsave(&irq->irq_lock, flags);
 
 	if (!vgic_validate_injection(irq, level, owner)) {
+		pr_info("[HOST]: validating injection failed for %d\n\n", intid);
 		/* Nothing to see here, move along... */
 		raw_spin_unlock_irqrestore(&irq->irq_lock, flags);
 		vgic_put_irq(kvm, irq);
@@ -521,6 +526,8 @@ int kvm_vgic_map_phys_irq(struct kvm_vcpu *vcpu, unsigned int host_irq,
 	struct vgic_irq *irq = vgic_get_irq(vcpu->kvm, vcpu, vintid);
 	unsigned long flags;
 	int ret;
+	pr_info("[HOST]%s: virtual intid: %d -> hwintid:%d \n",
+		       	__func__, vintid, host_irq);
 
 	BUG_ON(!irq);
 

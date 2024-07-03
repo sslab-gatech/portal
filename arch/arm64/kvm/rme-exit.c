@@ -148,10 +148,14 @@ static int rec_exit_portal_dev_mng(struct kvm_vcpu *vcpu)
 		 base:%lx    size:%lx   target_rec_addr:%lx   dev_flag:%lx\n", 
 		 __func__, dev_base, dev_size, dev_target_rd, dev_flag);
 	
+#if 0
+	//FIXME{Currently injection is implemented on RMM side, but the interrupt should
+	be injected from the host not from the RMM}}
 	//inject interrupt 
 	pr_info("[HOST:%s]: Injecting portal event (%d)\n", __func__, PORTAL_EVENT);
 	kvm_vgic_inject_irq(vcpu->kvm, vcpu->vcpu_id, PORTAL_EVENT,
 			    0, NULL);
+#endif 
 
 	return 1;
 

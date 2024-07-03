@@ -196,6 +196,7 @@ int kvm_vgic_vcpu_init(struct kvm_vcpu *vcpu)
 	raw_spin_lock_init(&vgic_cpu->ap_list_lock);
 	atomic_set(&vgic_cpu->vgic_v3.its_vpe.vlpi_count, 0);
 
+	pr_info("[HOST]%s\n",__func__);
 	/*
 	 * Enable and configure all SGIs to be edge-triggered and
 	 * configure all PPIs as level-triggered.
@@ -226,8 +227,8 @@ int kvm_vgic_vcpu_init(struct kvm_vcpu *vcpu)
 	 * If we are creating a VCPU with a GICv3 we must also register the
 	 * KVM io device for the redistributor that belongs to this VCPU.
 	 */
+	pr_info("[HOST]%s, vgic_model:%d \n\n",__func__, dist->vgic_model);
 	if (dist->vgic_model == KVM_DEV_TYPE_ARM_VGIC_V3) {
-		printk("[HOST]%s\n\n",__func__);
 		mutex_lock(&vcpu->kvm->lock);
 		ret = vgic_register_redist_iodev(vcpu);
 		mutex_unlock(&vcpu->kvm->lock);
@@ -270,6 +271,9 @@ int vgic_init(struct kvm *kvm)
 	/* freeze the number of spis */
 	if (!dist->nr_spis)
 		dist->nr_spis = VGIC_NR_IRQS_LEGACY - VGIC_NR_PRIVATE_IRQS;
+
+	pr_info("[HOST]:%s  number of nr_spis initialized for vgic:%d\n",
+		       __func__, dist->nr_spis);
 
 	ret = kvm_vgic_dist_init(kvm, dist->nr_spis);
 	if (ret)
@@ -412,6 +416,8 @@ int vgic_lazy_init(struct kvm *kvm)
 		 * be explicitly initialized once setup with the respective
 		 * KVM device call.
 		 */
+		pr_info("[HOST]%s: lazy init vgic model is :%d\n",
+			       	__func__, kvm->arch.vgic.vgic_model);
 		if (kvm->arch.vgic.vgic_model != KVM_DEV_TYPE_ARM_VGIC_V2)
 			return -EBUSY;
 
@@ -439,6 +445,7 @@ int kvm_vgic_map_resources(struct kvm *kvm)
 	struct vgic_dist *dist = &kvm->arch.vgic;
 	int ret = 0;
 
+	pr_info("[HOST]%s is invoked! \n", __func__);
 	if (likely(vgic_ready(kvm)))
 		return 0;
 

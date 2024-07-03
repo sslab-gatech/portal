@@ -184,6 +184,8 @@ void vgic_v3_populate_lr(struct kvm_vcpu *vcpu, struct vgic_irq *irq, int lr)
 
 	val |= (u64)irq->priority << ICH_LR_PRIORITY_SHIFT;
 
+	if(irq->intid != 27) 
+		pr_info("HOST %s  irq:%d -> hwirq:%d\n", __func__,  irq->intid, irq->hwintid);
 	vcpu->arch.vgic_cpu.vgic_v3.vgic_lr[lr] = val;
 }
 

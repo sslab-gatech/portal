@@ -1733,7 +1733,7 @@ static void cpu_hyp_init_features(void)
 	if (is_kernel_in_hyp_mode())
 		kvm_timer_init_vhe();
 
-	if (vgic_present)
+	if (vgic_present) 
 		kvm_vgic_init_cpu_hardware();
 }
 

@@ -1170,6 +1170,7 @@ int kvm_timer_hyp_init(bool has_gic)
 
 	/* First, do the virtual EL1 timer irq */
 
+	pr_info("[HOST]%s, host_vtimer_irq: %d\n", __func__, host_vtimer_irq);
 	err = request_percpu_irq(host_vtimer_irq, kvm_arch_timer_handler,
 				 "kvm guest vtimer", kvm_get_running_vcpus());
 	if (err) {
@@ -1303,8 +1304,9 @@ int kvm_timer_enable(struct kvm_vcpu *vcpu)
 	 * We don't use mapped IRQs for Realms because the RMI doesn't allow
 	 * us setting the LR.HW bit in the VGIC.
 	 */
-	if (vcpu_is_rec(vcpu))
+	if (vcpu_is_rec(vcpu)) {
 		return 0;
+	}
 
 	get_timer_map(vcpu, &map);
 
@@ -1385,9 +1387,13 @@ int kvm_arm_timer_set_attr(struct kvm_vcpu *vcpu, struct kvm_device_attr *attr)
 	switch (attr->attr) {
 	case KVM_ARM_VCPU_TIMER_IRQ_VTIMER:
 		set_timer_irqs(vcpu->kvm, irq, ptimer->irq.irq);
+		pr_info("[HOST]KVM_ARM_VCPU_TIMER_IRQ_VTIMER: %d -> %d \n",
+				irq, ptimer->irq.irq);
 		break;
 	case KVM_ARM_VCPU_TIMER_IRQ_PTIMER:
 		set_timer_irqs(vcpu->kvm, vtimer->irq.irq, irq);
+		pr_info("[HOST]KVM_ARM_VCPU_TIMER_IRQ_PTIMER: %d -> %d \n",
+				vtimer->irq.irq, irq);
 		break;
 	default:
 		return -ENXIO;
