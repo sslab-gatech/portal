@@ -58,13 +58,13 @@ static inline void set_memory_range_portal_executable(phys_addr_t start, phys_ad
 
 static void portal_attach_dev(phys_addr_t dev_addr)
 {
-	pr_info("[%s]: device addr:%lx \n", __func__, dev_addr);
-	rsi_device_management(dev_addr, 0);
+	pr_info("[REALM:%s]: device addr:%lx \n", __func__, dev_addr);
+	rsi_device_management(dev_addr, DEV_ATTACH);
 }
 
 static void portal_detach_dev(phys_addr_t dev_addr)
 {
 	pr_info("%s invoked\n", __func__);
-	rsi_device_management(dev_addr, 1);
+	rsi_device_management(dev_addr, DEV_DETACH);
 }
 #endif

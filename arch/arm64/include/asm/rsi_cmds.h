@@ -10,6 +10,14 @@
 
 #include <asm/rsi_smc.h>
 
+/* For portal related rsi call */
+enum portal_dev_mng_cmd {
+        DEV_ATTACH = 0x1,
+        DEV_DETACH,
+        DEV_SMMU_MAPPED
+};
+
+
 enum ripas {
 	RSI_RIPAS_EMPTY,
 	RSI_RIPAS_RAM,

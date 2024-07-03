@@ -31,7 +31,7 @@ static irqreturn_t portal_dev_handler(int irq, void *dev_id)
 	//TODO{Device should be properly detached}
 
 	//notify RMM the device has been detached from the realm
-	portal_detach_dev(0xdeadbeef);
+	//portal_detach_dev(0xdeadbeef);
 	return IRQ_HANDLED;
 }
 

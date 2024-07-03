@@ -823,6 +823,7 @@ unsigned int irq_create_fwspec_mapping(struct irq_fwspec *fwspec)
 		return 0;
 	}
 
+	pr_info("okay hwirq:%lu has not been registered before\n", hwirq);
 	if (irq_domain_is_hierarchy(domain)) {
 		virq = irq_domain_alloc_irqs(domain, 1, NUMA_NO_NODE, fwspec);
 		if (virq <= 0)
