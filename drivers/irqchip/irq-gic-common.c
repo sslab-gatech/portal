@@ -47,7 +47,7 @@ int gic_configure_irq(unsigned int irq, unsigned int type,
 	int ret = 0;
 	unsigned long flags;
 
-	pr_info("%s: Irq(%d) type(%d) base:%p\n",  __func__, irq, type, base);
+	pr_info("%s: Irq(%d) type(%d) base:%p\n\n",  __func__, irq, type, base);
 	/*
 	 * Read current configuration register, and insert the config
 	 * for "irq", depending on "type".
@@ -74,8 +74,14 @@ int gic_configure_irq(unsigned int irq, unsigned int type,
 	 * non-secure mode, and hence it may not be catastrophic.
 	 */
 	writel_relaxed(val, base + confoff);
-	if (readl_relaxed(base + confoff) != val)
+	if (readl_relaxed(base + confoff) != val) {
+		pr_info("%s:Failed to write configuration (offset:%x)\n", 
+				__func__, confoff);
 		ret = -EINVAL;
+	} else {
+		pr_info("%s:Success to write configuration (offset:%x)\n",
+				__func__, confoff);
+	}
 
 	raw_spin_unlock_irqrestore(&irq_controller_lock, flags);
 

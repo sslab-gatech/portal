@@ -44,7 +44,7 @@ static int portal_device_probe(struct platform_device *pdev) {
 	pr_info("[%s] virtual device for portal is found\n",__func__);
 
 	//the returned irq_num is kernel irq not hwirq
-	if (!(irq_num = platform_get_irq_byname(pdev, "portal")))
+	if (!(irq_num = platform_get_irq_byname(pdev, "portal-attach")))
 		pr_info("parsing error, cannot find irq_num for portal\n");
 
 	//subscribe irq 
@@ -70,7 +70,48 @@ static int portal_device_probe(struct platform_device *pdev) {
 	} else {
 		pr_info("IRQ %d is subscribed for portal!\n", irq_num);
 	}
+	
+	//the returned irq_num is kernel irq not hwirq
+	if (!(irq_num = platform_get_irq_byname(pdev, "portal-detach")))
+		pr_info("parsing error, cannot find irq_num for portal\n");
 
+	ret = request_irq(irq_num, portal_dev_handler,
+			IRQF_ONESHOT, "portal device management", NULL);
+	if (ret) {
+		switch (ret) {
+			case -EBUSY:
+				printk(KERN_ERR "IRQ %d is busy\n", irq_num);
+				break;
+			case -EINVAL:
+				printk(KERN_ERR "Invalid argument for %d\n", irq_num);
+				break;
+			case -ENOMEM:
+				printk(KERN_ERR "Not enough memory for %d\n", irq_num);
+				break;
+			default:
+				printk(KERN_ERR "Unknown error for %d\n", irq_num);
+				break;
+
+			return 0;
+		}		
+	} else {
+		pr_info("IRQ %d is subscribed for portal!\n", irq_num);
+	}
+
+	//the returned irq_num is kernel irq not hwirq
+	if (!(irq_num = platform_get_irq_byname(pdev, "map-smmu")))
+		pr_info("parsing error, cannot find irq_num for portal\n");
+
+	ret = request_irq(irq_num, portal_dev_handler,
+			IRQF_ONESHOT, "portal device management", NULL);
+	
+	//the returned irq_num is kernel irq not hwirq
+	if (!(irq_num = platform_get_irq_byname(pdev, "unmap-smmu")))
+		pr_info("parsing error, cannot find irq_num for portal\n");
+
+	ret = request_irq(irq_num, portal_dev_handler,
+			IRQF_ONESHOT, "portal device management", NULL);
+	
 	//for testing
 	portal_attach_dev(0xdeadbeef);
 	return 0;

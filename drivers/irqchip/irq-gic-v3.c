@@ -585,6 +585,7 @@ static int gic_set_type(struct irq_data *d, unsigned int type)
 	int ret;
 
 	range = get_intid_range(d);
+	pr_info("Requested interrupt range is %d\n", range);
 
 	/* Interrupt configuration for SGIs can't be changed */
 	if (range == SGI_RANGE)
@@ -592,8 +593,10 @@ static int gic_set_type(struct irq_data *d, unsigned int type)
 
 	/* SPIs have restrictions on the supported types */
 	if ((range == SPI_RANGE || range == ESPI_RANGE) &&
-	    type != IRQ_TYPE_LEVEL_HIGH && type != IRQ_TYPE_EDGE_RISING)
+	    type != IRQ_TYPE_LEVEL_HIGH && type != IRQ_TYPE_EDGE_RISING) {
+		pr_info("SPI have restrictions on supported types!\n");
 		return -EINVAL;
+	}
 
 	if (gic_irq_in_rdist(d))
 		base = gic_data_rdist_sgi_base();
