@@ -215,8 +215,6 @@ unsigned long smc_rec_enter(unsigned long rec_addr,
 	rec = granule_map(g_rec, SLOT_REC);
 
 	rd = granule_map(rec->realm_info.g_rd, SLOT_RD);
-	portal_dev_event = rd->portal_event;
-	//XXX{rd->portal_event needs to be reset?}
 	realm_state = get_rd_state_unlocked(rd);
 	buffer_unmap(rd);
 
@@ -254,11 +252,19 @@ unsigned long smc_rec_enter(unsigned long rec_addr,
 	gic_copy_state_from_ns(&rec->sysregs.gicstate, &rec_run.entry);
 
 #if ENABLE_PORTAL
+	rd = granule_map(rec->realm_info.g_rd, SLOT_RD);
+
+	// FIXME{should be used with lock}
+	portal_dev_event = rd->portal_event;
+
 	if (!gic_verify_portal_interrupt(&rec->sysregs.gicstate, portal_dev_event))
 	{
 		ret = RMI_ERROR_REC;
 		goto out_unmap_buffers;
 	}
+
+	rd->portal_event = INT_PROCESSED;
+	buffer_unmap(rd);
 #endif 
 	if (!gic_validate_state(&rec->sysregs.gicstate, portal_dev_event)) {
 		INFO("gic valiation failed!!\n");

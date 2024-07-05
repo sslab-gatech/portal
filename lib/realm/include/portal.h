@@ -21,7 +21,8 @@ struct portal_dev {
 #endif 
 
 enum portal_event {
-	DEV_ATTACH_INT = 0x1,
+	INT_PROCESSED,
+	DEV_ATTACH_INT,
 	DEV_DETACH_INT,
 	CMD_Q_ATTACH_INT,	/* for system realm */
 	DEV_MAP_SMMU_INT, 	/* for system realm */

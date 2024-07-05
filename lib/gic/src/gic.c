@@ -270,9 +270,6 @@ bool gic_verify_portal_interrupt(struct gic_cpu_state *gicstate, enum portal_eve
 			gicstate->ich_lr_el2[i] = injected_lr;
 			injected = true; 
 		}
-
-
-
         }
 
 	return true;
