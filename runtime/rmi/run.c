@@ -257,13 +257,17 @@ unsigned long smc_rec_enter(unsigned long rec_addr,
 	// FIXME{should be used with lock}
 	portal_dev_event = rd->portal_event;
 
-	if (!gic_verify_portal_interrupt(&rec->sysregs.gicstate, portal_dev_event))
-	{
-		ret = RMI_ERROR_REC;
-		goto out_unmap_buffers;
+	if (portal_dev_event >= DEV_ATTACH_INT && portal_dev_event < PORTAL_EVENT_COUNT) {
+		if (!gic_verify_portal_interrupt(&rec->sysregs.gicstate, portal_dev_event))
+		{
+			ret = RMI_ERROR_REC;
+			buffer_unmap(rd);
+			goto out_unmap_buffers;
+		}
+
+		rd->portal_event = INT_PROCESSED;
 	}
 
-	rd->portal_event = INT_PROCESSED;
 	buffer_unmap(rd);
 #endif 
 	if (!gic_validate_state(&rec->sysregs.gicstate, portal_dev_event)) {
@@ -310,7 +314,6 @@ unsigned long smc_rec_enter(unsigned long rec_addr,
 
 out_unmap_buffers:
 	buffer_unmap(rec);
-
 	if (ret == RMI_SUCCESS) {
 		if (!ns_buffer_write(SLOT_NS, g_run,
 				     offsetof(struct rmi_rec_run, exit),
