@@ -58,9 +58,9 @@ void rmm_warmboot_main(void)
 
 	/* Virtual portal device for interrupt */
 	//XXX{Information should be passed from TF-a in fdt
-	portal_interrupts[CMD_Q_ATTACH_INT] =	PORTAL_INTERRUPT;
-	portal_interrupts[DEV_ATTACH_INT] = 	PORTAL_INTERRUPT+1;
-	portal_interrupts[DEV_DETACH_INT] =	PORTAL_INTERRUPT+2;
+	portal_interrupts[DEV_ATTACH_INT] = 	PORTAL_INTERRUPT;
+	portal_interrupts[DEV_DETACH_INT] =	PORTAL_INTERRUPT+1;
+	portal_interrupts[CMD_Q_ATTACH_INT] =	PORTAL_INTERRUPT+2;
 
 	/*
 	 * Do the rest of RMM architecture init

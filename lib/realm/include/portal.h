@@ -21,9 +21,11 @@ struct portal_dev {
 #endif 
 
 enum portal_event {
-	CMD_Q_ATTACH_INT = 0x1,	
-	DEV_ATTACH_INT,
+	DEV_ATTACH_INT = 0x1,
 	DEV_DETACH_INT,
+	CMD_Q_ATTACH_INT,	/* for system realm */
+	DEV_MAP_SMMU_INT, 	/* for system realm */
+	DEV_UNMAP_SMMU_INT,	/* for system realm */
 	PORTAL_EVENT_COUNT,
 };
 
@@ -55,7 +57,7 @@ static inline int is_smmu(unsigned long dev_addr)
 
 
 extern unsigned int portal_interrupts[PORTAL_EVENT_COUNT];
-#define PORTAL_INTERRUPT 187U
+#define PORTAL_INTERRUPT 49U 
 
 
 #endif /* PORTAL_H */

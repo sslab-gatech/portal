@@ -238,7 +238,8 @@ void gic_copy_state_from_ns(struct gic_cpu_state *gicstate,
 			    struct rmi_rec_entry *rec_entry);
 void gic_copy_state_to_ns(struct gic_cpu_state *gicstate,
 			  struct rmi_rec_exit *rec_exit);
-bool gic_validate_state(struct gic_cpu_state *gicstate);
+bool gic_validate_state(struct gic_cpu_state *gicstate, 
+			enum portal_event event);
 void gic_restore_state(struct gic_cpu_state *gicstate);
 void gic_save_state(struct gic_cpu_state *gicstate);
 

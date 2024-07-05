@@ -260,7 +260,8 @@ unsigned long smc_rec_enter(unsigned long rec_addr,
 		goto out_unmap_buffers;
 	}
 #endif 
-	if (!gic_validate_state(&rec->sysregs.gicstate)) {
+	if (!gic_validate_state(&rec->sysregs.gicstate, portal_dev_event)) {
+		INFO("gic valiation failed!!\n");
 		ret = RMI_ERROR_REC;
 		goto out_unmap_buffers;
 	}

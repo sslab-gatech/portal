@@ -177,7 +177,7 @@ static bool is_valid_vintid(unsigned long intid)
 		false);
 }
 
-bool gic_validate_state(struct gic_cpu_state *gicstate)
+bool gic_validate_state(struct gic_cpu_state *gicstate,  enum portal_event event)
 {
 	unsigned int i, j;
 
@@ -205,6 +205,26 @@ bool gic_validate_state(struct gic_cpu_state *gicstate)
 			return false;
 		}
 
+#if 0
+		/* Prevent host from injecting unauthorized interrupt */
+                switch (intid) {
+                        case CMD_Q_ATTACH_INT:
+				if (event!= CMD_Q_ATTACH_INT) 
+					return false;
+                                break;
+                        case DEV_ATTACH_INT:
+				if (event!= DEV_ATTACH_INT) 
+					return false;
+                                break;
+                        case DEV_DETACH_INT:
+				if (event!= DEV_DETACH_INT) 
+					return false;
+                                break;
+                        default:
+                                break;
+                }
+#endif 
+
 		/*
 		 * Behavior is UNPREDICTABLE if two or more List Registers
 		 * specify the same vINTID.
@@ -228,11 +248,8 @@ bool gic_validate_state(struct gic_cpu_state *gicstate)
 
 bool gic_verify_portal_interrupt(struct gic_cpu_state *gicstate, enum portal_event event)
 {
-	return true;
-#if 0
         unsigned int i;
 	bool injected = false;
-        /* Prevent host from injecting unauthorized interrupt */
 
 
         for (i = 0U; i <= gic_virt_feature.nr_lrs; i++) {
@@ -240,12 +257,15 @@ bool gic_verify_portal_interrupt(struct gic_cpu_state *gicstate, enum portal_eve
                 unsigned long intid = EXTRACT(ICH_LR_VINTID, lr);
 
 		/* FIXME{dirty hack to inject interrupt to empty slot!} */
-		if ((lr & ICH_LR_STATE_MASK) == ICH_LR_STATE_INVALID) {
+		if ((lr & ICH_LR_STATE_MASK) == ICH_LR_STATE_INVALID && 
+		     event == DEV_ATTACH_INT && !injected) {
+			INFO("Device need to be attached! Inject interrupt !\n");
 			if (injected) continue; 
 			unsigned long injected_lr = 0UL;
 			intid = portal_interrupts[DEV_ATTACH_INT]; 
-			injected_lr |= (intid << ICH_LR_VINTID_SHIFT);
-			injected_lr |= (0x1UL << ICH_LR_STATE_SHIFT);
+			injected_lr |= (intid << ICH_LR_VINTID_SHIFT); 
+			injected_lr |= (0x1UL << ICH_LR_STATE_SHIFT); //pending 
+			injected_lr |= (0x1UL << ICH_LR_GROUP_SHIFT); //Group 1
 
 			gicstate->ich_lr_el2[i] = injected_lr;
 			injected = true; 
@@ -253,24 +273,9 @@ bool gic_verify_portal_interrupt(struct gic_cpu_state *gicstate, enum portal_eve
 
 
 
-                switch (intid) {
-                        case CMD_Q_ATTACH_INT:
-                                break;
-                        case DEV_ATTACH_INT:
-				/* inject interrupt testing */
-				
-
-
-                                break;
-                        case DEV_DETACH_INT:
-                                break;
-                        default:
-                                break;
-                }
         }
 
 	return true;
-#endif 
 }
 
 /* Save ICH_LR<n>_EL2 registers [n...0] */

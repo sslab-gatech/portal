@@ -33,6 +33,7 @@ unsigned long handle_rsi_portal_dev_mng(struct rec *rec, struct rmi_rec_exit *re
 	unsigned long requester_rd = granule_addr(rec->realm_info.g_rd);
 	unsigned long requestee_rd = 0UL;
 	unsigned long host_cmd = 0UL;
+	enum portal_event portal_irq; 
 
 	/* for device testing temporarily generate device info */
 	static int init = 0;
@@ -42,6 +43,7 @@ unsigned long handle_rsi_portal_dev_mng(struct rec *rec, struct rmi_rec_exit *re
 					.prev_state=DEV_EMPTY, .owner_rd_addr = requester_rd,
 					.dev_name="PortalTestingDev"}; 
 		rb_insert(&rb_dev_tree, test_dev);
+		/* Set realm address as requester_rd for testing injections */
 		rd_system_realm_addr = requester_rd; 
 	}
 	/* end of test code */
@@ -66,7 +68,12 @@ unsigned long handle_rsi_portal_dev_mng(struct rec *rec, struct rmi_rec_exit *re
 						dev_info->state = DEV_IN_TRANSIT;
 						dev_info->prev_state = DEV_EMPTY;
 						requestee_rd = rd_system_realm_addr;
+						/* Notification for host */
 						host_cmd = DEV_DELEGATE;
+						/* Notification for realm */
+						portal_irq = DEV_ATTACH_INT;
+						//FIXME{Should be changed to below}
+						//portal_irq = DEV_MAP_SMMU_INT;
 						/* Exit to host kernel to ask device delegation */
 						goto exit_to_host;
 					/* Currently just grab the device from other realm.
@@ -154,6 +161,22 @@ exit_to_host:
 	rec_exit->portal_dev_size = dev_info->size;
 	rec_exit->portal_dev_target_rd = requestee_rd;
 	rec_exit->portal_dev_flag = host_cmd;
+
+	//bind device attachment event to requestee_rd
+	struct granule *g_rd;
+	struct rd *rd; 
+	g_rd = find_lock_granule(requestee_rd, GRANULE_STATE_RD);
+	if (g_rd == NULL) {
+		return RMI_ERROR_INPUT;
+	}
+
+	rd = granule_map(g_rd, SLOT_RD);
+	/* Indicate the requestee realm should handle portal event */
+	rd->portal_event = portal_irq;
+
+	buffer_unmap(rd);
+	granule_unlock(g_rd);
+
 	return 0;
 }
 
