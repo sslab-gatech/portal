@@ -147,6 +147,8 @@ struct rec_params {
 #define RMI_TRAP_WFI			BIT(2)
 #define RMI_TRAP_WFE			BIT(3)
 
+#define RMI_DEV_MNG_HANDLED		BIT(4)
+
 #define REC_RUN_GPRS			31
 #define REC_GIC_NUM_LRS			16
 

@@ -139,15 +139,41 @@ static void update_arch_timer_irq_lines(struct kvm_vcpu *vcpu)
 static int rec_exit_portal_dev_mng(struct kvm_vcpu *vcpu)
 {
 	struct rec *rec = &vcpu->arch.rec;
+	struct kvm *target_vm = NULL;
+	struct kvm *kvm= NULL;
 	unsigned long dev_base = rec->run->exit.portal_dev_base;
 	unsigned long dev_size = rec->run->exit.portal_dev_size;
 	unsigned long dev_target_rd = rec->run->exit.portal_dev_target_rd;
 	unsigned long dev_flag = rec->run->exit.portal_dev_flag; 
 
 	pr_info("[HOST:%s]: Portal device management requested from REALM!\n        \
-		 base:%lx    size:%lx   target_rec_addr:%lx   dev_flag:%lx\n", 
+		 base:%lx    size:%lx   target_rd_addr:%lx   dev_flag:%lx\n", 
 		 __func__, dev_base, dev_size, dev_target_rd, dev_flag);
-	
+
+	/* find matching kvm for target_rd */
+	mutex_lock(&kvm_lock);
+	list_for_each_entry(kvm, &vm_list, vm_list) {
+		struct realm *realm = &kvm->arch.realm;
+		unsigned long rd_phys = virt_to_phys(realm->rd);
+		if (rd_phys == dev_target_rd) {
+			pr_info("Matching kvm found\n");
+			target_vm = kvm;
+			break;
+		}  
+	}
+	mutex_unlock(&kvm_lock);
+
+	if (!target_vm) {
+		pr_err("No matching KVM\n!");
+		return -1;
+	}
+	/* get vcpu */
+
+
+	/* Inject Interrupt */
+
+
+
 #if 0
 	//FIXME{Currently injection is implemented on RMM side, but the interrupt should
 	be injected from the host not from the RMM}}
@@ -157,7 +183,7 @@ static int rec_exit_portal_dev_mng(struct kvm_vcpu *vcpu)
 			    0, NULL);
 #endif 
 
-	return 1;
+	return 0;
 
 }
 

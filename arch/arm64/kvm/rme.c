@@ -249,6 +249,8 @@ static int realm_create_rd(struct kvm *kvm)
 	}
 
 	realm->rd = rd;
+	pr_info("created realm->rd:%lx (virt) -> %lx (phys)\n", 
+			realm->rd, rd_phys);
 	realm->spare_page = PHYS_ADDR_MAX;
 	realm->ia_bits = VTCR_EL2_IPA(kvm->arch.vtcr);
 
