@@ -29,7 +29,7 @@ unsigned long handle_rsi_portal_dev_mng(struct rec *rec, struct rmi_rec_exit *re
 	device_info *dev_info;
 
 	unsigned long base_addr = rec->regs[1];
-	unsigned long cmd = rec->regs[2];
+	unsigned long rsi_cmd = rec->regs[2];
 	unsigned long requester_rd = granule_addr(rec->realm_info.g_rd);
 	unsigned long requestee_rd = 0UL;
 	unsigned long host_cmd = 0UL;
@@ -53,9 +53,9 @@ unsigned long handle_rsi_portal_dev_mng(struct rec *rec, struct rmi_rec_exit *re
 	dev_node = search_rb_tree(&rb_dev_tree, base_addr);
 	if (dev_node) {
 		dev_info = &(dev_node->dev_info);
-		INFO("[RMM:%s]: device found on the rmm dev list! base addr:%lx, state:%x cmd:%lx\n",
-				__func__, dev_info->base, dev_info->state, cmd);
-		switch ((enum portal_dev_mng_cmd)cmd) {
+		INFO("[RMM:%s]: device found on the rmm dev list! base addr:%lx, state:%x rsi_cmd:%lx\n",
+				__func__, dev_info->base, dev_info->state, rsi_cmd);
+		switch ((enum portal_dev_mng_cmd)rsi_cmd) {
 			case DEV_ATTACH:
 				/* Only system realm can occupy SMMU device */
 				if (is_smmu(base_addr) && !is_system_realm(requester_rd)) {
@@ -157,10 +157,13 @@ exit_to_host:
 	INFO("[RMM]:Exiting to host!\n");
 	INFO("[RMM]:Base: %lx, size: %lx, target_rd: %lx, flag:%lx\n",
 		dev_info->base, dev_info->size, requestee_rd, host_cmd);
+
+	/* rec_exit is the private structure kept in RMM */
 	rec_exit->portal_dev_base = dev_info->base;
 	rec_exit->portal_dev_size = dev_info->size;
 	rec_exit->portal_dev_target_rd = requestee_rd;
-	rec_exit->portal_dev_flag = host_cmd;
+	rec_exit->portal_dev_flag |= (host_cmd & PORTAL_DEV_NEXT_CMD_MASK) << PORTAL_DEV_NEXT_CMD_SHIFT;
+	rec_exit->portal_dev_flag |= (rsi_cmd & PORTAL_DEV_RSI_REQ_MASK) << PORTAL_DEV_RSI_REQ_SHFIT;
 
 	//bind device attachment event to requestee_rd
 	struct granule *g_rd;
@@ -170,10 +173,9 @@ exit_to_host:
 		return RMI_ERROR_INPUT;
 	}
 
-	rd = granule_map(g_rd, SLOT_RD);
 	/* Indicate the requestee realm should handle portal event */
+	rd = granule_map(g_rd, SLOT_RD);
 	rd->portal_event = portal_irq;
-
 	buffer_unmap(rd);
 	granule_unlock(g_rd);
 

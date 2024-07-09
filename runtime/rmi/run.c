@@ -25,6 +25,24 @@ static void reset_last_run_info(struct rec *rec)
 	rec->last_run_info.esr = 0UL;
 }
 
+static bool complete_portal_dev_management(struct rec *rec, struct rmi_rec_entry *rec_entry)
+{
+	/* Check host intention */
+	if ((rec_entry->flags& REC_ENTRY_FLAG_DEV_MNG_HANDLED) == 0UL) 
+		return true; 
+	
+	
+	/* check whether the requested rsi call for portal device management
+	 * has finished */
+	
+
+
+
+	/* advance pc after handling dev management */
+	rec->pc = rec->pc + 4UL; 
+	return true;
+}
+
 static bool complete_mmio_emulation(struct rec *rec, struct rmi_rec_entry *rec_entry)
 {
 	unsigned long esr = rec->last_run_info.esr;
@@ -269,6 +287,13 @@ unsigned long smc_rec_enter(unsigned long rec_addr,
 	}
 
 	buffer_unmap(rd);
+
+
+	/* Change status of the rec after host handling rsi */
+	if(!complete_portal_dev_management(rec, &rec_run.entry)) {
+		ret = RMI_ERROR_REC;
+		goto out_unmap_buffers;
+	}
 #endif 
 	if (!gic_validate_state(&rec->sysregs.gicstate, portal_dev_event)) {
 		INFO("gic valiation failed!!\n");

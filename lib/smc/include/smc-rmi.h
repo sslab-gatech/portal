@@ -107,6 +107,8 @@
 #define REC_ENTRY_FLAG_TRAP_WFI		(UL(1) << 2)
 #define REC_ENTRY_FLAG_TRAP_WFE		(UL(1) << 3)
 
+/* Flag to indicate portal device management finished */
+#define REC_ENTRY_FLAG_DEV_MNG_HANDLED (UL(1) << 4)
 /*
  * RmiRecExitReason represents the reason for a REC exit.
  * This is returned to NS hosts via RMI_REC_ENTER::run_ptr.
@@ -463,6 +465,11 @@ struct rmi_rec_exit {
 	SET_MEMBER_RMI(unsigned long pmu_cntr_en, 0x710, 0x800); /* 0x710 */
 
 };
+
+#define PORTAL_DEV_RSI_REQ_MASK 	0xfUL
+#define PORTAL_DEV_RSI_REQ_SHFIT 	0x0UL
+#define PORTAL_DEV_NEXT_CMD_MASK	0xfUL
+#define PORTAL_DEV_NEXT_CMD_SHIFT 	0x4UL
 
 /*
  * Structure contains shared information between RMM and Host
