@@ -86,6 +86,7 @@ static int portal_device_probe(struct platform_device *pdev) {
 
 	//for testing
 	portal_attach_dev(0xdeadbeef);
+	portal_detach_dev(0xdeadbeef);
 	return 0;
 
 }
