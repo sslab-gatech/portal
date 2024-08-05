@@ -138,11 +138,11 @@ static void update_arch_timer_irq_lines(struct kvm_vcpu *vcpu)
 
 static int rec_exit_portal_dev_mng(struct kvm_vcpu *vcpu)
 {
-	int index = i;
+	//int index = i;
 	struct rec *rec = &vcpu->arch.rec;
 	struct kvm *target_vm = NULL;
 	struct kvm *kvm= NULL;
-	struct kvm_vcpu *vcpu = NULL;
+	//struct kvm_vcpu *vcpu = NULL;
 	struct kvm_vcpu *realm_vcpu = NULL;
 
 	unsigned long dev_base = rec->run->exit.portal_dev_base;
