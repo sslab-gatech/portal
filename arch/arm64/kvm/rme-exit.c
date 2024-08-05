@@ -138,13 +138,18 @@ static void update_arch_timer_irq_lines(struct kvm_vcpu *vcpu)
 
 static int rec_exit_portal_dev_mng(struct kvm_vcpu *vcpu)
 {
+	int index = i;
 	struct rec *rec = &vcpu->arch.rec;
 	struct kvm *target_vm = NULL;
 	struct kvm *kvm= NULL;
+	struct kvm_vcpu *vcpu = NULL;
+	struct kvm_vcpu *realm_vcpu = NULL;
+
 	unsigned long dev_base = rec->run->exit.portal_dev_base;
 	unsigned long dev_size = rec->run->exit.portal_dev_size;
 	unsigned long dev_target_rd = rec->run->exit.portal_dev_target_rd;
 	unsigned long dev_flag = rec->run->exit.portal_dev_flag; 
+	unsigned int intid; 
 
 	pr_info("[HOST:%s]: Portal device management requested from REALM!\n        \
 		 base:%lx    size:%lx   target_rd_addr:%lx   dev_flag:%lx\n", 
@@ -167,10 +172,13 @@ static int rec_exit_portal_dev_mng(struct kvm_vcpu *vcpu)
 		pr_err("No matching KVM\n!");
 		return -1;
 	}
-	/* get vcpu */
 
+	/* Set up intid */
+	intid = 0x10;
 
 	/* Inject Interrupt */
+	kvm_vgic_inject_irq(realm_vcpu->kvm, realm_vcpu->vcpu_id, intid,
+			    true, NULL);
 
 
 
